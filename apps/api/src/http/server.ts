@@ -30,24 +30,18 @@ const SENSITIVE = [
   'discordAccessToken',
 ];
 
-/** Each name at the top level, one level down, and in the request's headers and body. */
+/**
+ * Each name at the top level, one level down and in the request body. `*.code` is left out on
+ * purpose: it would also hide `err.code` (ECONNREFUSED and the like); OAuth codes are only ever
+ * logged at the top level or under a body.
+ */
 const REDACT_PATHS = [
   ...SENSITIVE,
-  ...SENSITIVE.map((n) => `*.${n}`),
-  ...SENSITIVE.map((n) => `req.body.${n}`),
+  ...SENSITIVE.filter((n) => n !== 'code').map((n) => `*.${n}`),
+  ...SENSITIVE.flatMap((n) => [`body.${n}`, `req.body.${n}`]),
   'req.headers.authorization',
   'req.headers.cookie',
 ];
-
-/**
- * Fastify treats a plain number as "trust nothing" (it cannot check the immediate peer), which
- * would make every client look like the proxy. Trusting the nearest `hops` addresses as proxies
- * makes `request.ip` the address the outermost trusted proxy saw, and ignores anything a client
- * put further left in X-Forwarded-For. Zero hops: use the socket address.
- */
-export function trustProxyHops(hops: number): false | ((address: string, index: number) => boolean) {
-  return hops > 0 ? (_address, index) => index < hops : false;
-}
 
 /** Builds the app. It is not listening or ready yet, so routes can still be added. */
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -58,7 +52,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       redact: { paths: REDACT_PATHS, censor: '[redacted]' },
       ...(deps.logStream ? { stream: deps.logStream } : {}),
     },
-    trustProxy: trustProxyHops(env.TRUST_PROXY_HOPS),
+    // Only peers in TRUSTED_PROXIES may set the client address; for anyone else it is the socket's.
+    trustProxy: env.TRUSTED_PROXIES.length > 0 ? env.TRUSTED_PROXIES : false,
     // The id comes from the server only, so a client cannot forge log correlation.
     requestIdHeader: false,
     genReqId: () => randomUUID(),
@@ -100,10 +95,10 @@ export async function runApi(): Promise<void> {
   const env = loadEnv();
   const config = loadServerConfig(process.env.CONFIG_PATH || undefined);
   const db = createDb(env.DATABASE_URL, (err) => log.error('database pool error', { error: err.message }));
-  const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 1 });
+  const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 1, connectTimeout: 500 });
   redis.on('error', (err) => log.error('redis error', { error: err.message }));
 
-  const app = await buildServer({ env, config, db, redis, discord: createDiscordClient(env) });
+  const app = await buildServer({ env, config, db, redis, discord: createDiscordClient(env, log) });
   const shutdown = createShutdown(
     {
       close: () => app.close(),

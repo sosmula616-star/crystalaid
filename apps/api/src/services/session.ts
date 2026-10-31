@@ -22,7 +22,11 @@ export function signSession(claims: SessionClaims, secret: string): Promise<stri
 /** An expired token is `TOKEN_EXPIRED` (the client may log in again); anything else is `UNAUTHORIZED`. */
 export async function verifySession(token: string, secret: string): Promise<SessionClaims> {
   try {
-    const { payload } = await jwtVerify(token, key(secret), { algorithms: ['HS256'] });
+    const { payload } = await jwtVerify(token, key(secret), {
+      algorithms: ['HS256'],
+      // A token that never expires must not be accepted.
+      requiredClaims: ['exp', 'iat'],
+    });
     if (typeof payload.userId !== 'string' || typeof payload.discordUserId !== 'string') {
       throw new AppError('UNAUTHORIZED', 'Invalid session', 401);
     }

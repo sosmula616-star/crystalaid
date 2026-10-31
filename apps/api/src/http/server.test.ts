@@ -165,6 +165,16 @@ describe('logging', () => {
       }
     }));
 
+  it('keeps err.code readable while masking OAuth codes', () =>
+    withApp({ redis }, async ({ app, logs }) => {
+      app.log.error({ err: Object.assign(new Error('boom'), { code: 'ECONNREFUSED' }) }, 'probe-err');
+      app.log.info({ body: { code: 'oauth-secret-1' }, req: { body: { code: 'oauth-secret-2' } } }, 'probe-body');
+      app.log.info({ code: 'oauth-secret-3' }, 'probe-top');
+      const text = logs.join('');
+      expect(text).toContain('ECONNREFUSED');
+      for (const n of [1, 2, 3]) expect(text).not.toContain(`oauth-secret-${n}`);
+    }));
+
   it('masks sensitive fields if they are logged', () =>
     withApp({ redis }, async ({ app, logs }) => {
       app.log.info(
@@ -213,19 +223,20 @@ describe('createShutdown', () => {
 });
 
 describe('trust proxy', () => {
-  it('takes the client address the nearest proxy saw, not what the client claimed', () =>
-    withApp(
-      {
-        redis,
-        setup: (app) => void app.get('/ip', async (request) => ({ ip: request.ip })),
-      },
-      async ({ app }) => {
-        const res = await app.inject({
-          method: 'GET',
-          url: '/ip',
-          headers: { 'x-forwarded-for': '6.6.6.6, 10.0.0.9' },
-        });
-        expect(res.json()).toEqual({ ip: '10.0.0.9' });
-      },
-    ));
+  const setup = (app: import('fastify').FastifyInstance) =>
+    void app.get('/ip', async (request) => ({ ip: request.ip }));
+  const ip = (app: import('fastify').FastifyInstance, remoteAddress: string, xff: string) =>
+    app.inject({ method: 'GET', url: '/ip', remoteAddress, headers: { 'x-forwarded-for': xff } });
+
+  it('by default a client keeps its socket address whatever X-Forwarded-For says', () =>
+    withApp({ redis, setup }, async ({ app }) => {
+      expect((await ip(app, '10.0.0.9', '6.6.6.6')).json()).toEqual({ ip: '10.0.0.9' });
+    }));
+
+  it('takes X-Forwarded-For only from a peer in TRUSTED_PROXIES', () =>
+    withApp({ redis, setup, env: { TRUSTED_PROXIES: ['10.0.0.9', '172.16.0.0/12'] } }, async ({ app }) => {
+      expect((await ip(app, '10.0.0.9', '6.6.6.6')).json()).toEqual({ ip: '6.6.6.6' });
+      expect((await ip(app, '172.20.1.1', '6.6.6.7')).json()).toEqual({ ip: '6.6.6.7' });
+      expect((await ip(app, '10.0.0.10', '6.6.6.8')).json()).toEqual({ ip: '10.0.0.10' });
+    }));
 });

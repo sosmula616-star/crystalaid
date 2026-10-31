@@ -1,4 +1,20 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
+
+function isIpOrCidr(entry: string): boolean {
+  const [address, prefix, ...rest] = entry.split('/');
+  const version = isIP(address ?? '');
+  if (version === 0 || rest.length > 0) return false;
+  if (prefix === undefined) return true;
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (version === 4 ? 32 : 128);
+}
+
+/** Comma-separated IPs or CIDRs; empty means no proxy is trusted. */
+const trustedProxies = z
+  .string()
+  .default('')
+  .transform((v) => v.split(',').map((e) => e.trim()).filter((e) => e !== ''))
+  .refine((list) => list.every(isIpOrCidr), 'must be a comma-separated list of IP addresses or CIDR ranges');
 
 const schema = z.object({
   DISCORD_CLIENT_ID: z.string().min(1),
@@ -9,11 +25,7 @@ const schema = z.object({
   REDIS_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   SERVICE_TOKEN: z.string().min(32),
-  TRUST_PROXY_HOPS: z
-    .string()
-    .regex(/^\d+$/, 'must be a non-negative integer')
-    .transform(Number)
-    .default(1),
+  TRUSTED_PROXIES: trustedProxies,
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
 });
 

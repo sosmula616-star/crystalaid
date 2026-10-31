@@ -70,7 +70,7 @@ export function testEnv(discordApiUrl: string): Env {
     REDIS_URL: 'redis://unused',
     JWT_SECRET,
     SERVICE_TOKEN,
-    TRUST_PROXY_HOPS: 1,
+    TRUSTED_PROXIES: [],
     PORT: 3001,
   };
 }

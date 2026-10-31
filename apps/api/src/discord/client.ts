@@ -1,5 +1,6 @@
 import { AppError } from '@crystalaid/contracts';
 import type { Env } from '@crystalaid/config';
+import { consoleLog, type Logger } from '../log.js';
 
 export interface DiscordUser {
   id: string;
@@ -30,34 +31,40 @@ export interface DiscordClient {
 
 const TIMEOUT_MS = 5000;
 
-const unavailable = () => new AppError('DISCORD_UNAVAILABLE', 'Discord is unavailable', 503);
-
 /**
  * Discord REST client. Rate limits (429), server errors and network failures or timeouts all
- * become `DISCORD_UNAVAILABLE`; nothing is retried. Messages never contain response bodies,
- * which may echo credentials.
+ * become `DISCORD_UNAVAILABLE`; nothing is retried. Each such failure is logged as a warning
+ * with the endpoint name and status only: never tokens, ids or response bodies, which may echo
+ * credentials.
  */
 export function createDiscordClient(
   env: Pick<Env, 'DISCORD_API_URL' | 'DISCORD_CLIENT_ID' | 'DISCORD_CLIENT_SECRET' | 'DISCORD_BOT_TOKEN'>,
+  log: Logger = consoleLog,
 ): DiscordClient {
   const base = env.DISCORD_API_URL.replace(/\/+$/, '');
 
-  async function call(path: string, init: RequestInit): Promise<Response> {
+  function unavailable(endpoint: string, detail: { status?: number; reason?: string }): AppError {
+    log.warn('discord request failed', { endpoint, ...detail });
+    return new AppError('DISCORD_UNAVAILABLE', 'Discord is unavailable', 503);
+  }
+
+  async function call(endpoint: string, path: string, init: RequestInit): Promise<Response> {
     let res: Response;
     try {
       res = await fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
-    } catch {
-      throw unavailable();
+    } catch (err) {
+      const timedOut = err instanceof Error && err.name === 'TimeoutError';
+      throw unavailable(endpoint, { reason: timedOut ? 'timeout' : 'network' });
     }
-    if (res.status === 429 || res.status >= 500) throw unavailable();
+    if (res.status === 429 || res.status >= 500) throw unavailable(endpoint, { status: res.status });
     return res;
   }
 
-  async function json<T>(res: Response): Promise<T> {
+  async function json<T>(endpoint: string, res: Response): Promise<T> {
     try {
       return (await res.json()) as T;
     } catch {
-      throw unavailable();
+      throw unavailable(endpoint, { status: res.status, reason: 'unreadable body' });
     }
   }
 
@@ -65,7 +72,7 @@ export function createDiscordClient(
 
   return {
     async exchangeCode(code) {
-      const res = await call('/oauth2/token', {
+      const res = await call('oauth2/token', '/oauth2/token', {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -75,46 +82,60 @@ export function createDiscordClient(
           code,
         }),
       });
+      // 401 means Discord rejected our own client id or secret: a configuration fault, not a bad code.
+      if (res.status === 401) {
+        throw unavailable('oauth2/token', { status: 401, reason: 'client credentials rejected' });
+      }
       if (res.status >= 400 && res.status < 500) {
         throw new AppError('UNAUTHORIZED', 'Invalid authorization code', 401);
       }
-      const body = await json<{ access_token?: unknown }>(res);
-      if (typeof body.access_token !== 'string') throw unavailable();
+      const body = await json<{ access_token?: unknown }>('oauth2/token', res);
+      if (typeof body.access_token !== 'string') {
+        throw unavailable('oauth2/token', { reason: 'no access token' });
+      }
       return body.access_token;
     },
 
     async getCurrentUser(accessToken) {
-      const res = await call('/users/@me', { headers: { authorization: `Bearer ${accessToken}` } });
+      const res = await call('users/@me', '/users/@me', {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
       if (res.status === 401 || res.status === 403) {
         throw new AppError('UNAUTHORIZED', 'Invalid Discord token', 401);
       }
-      if (!res.ok) throw unavailable();
-      const body = await json<Partial<DiscordUser>>(res);
-      if (typeof body.id !== 'string' || typeof body.username !== 'string') throw unavailable();
+      if (!res.ok) throw unavailable('users/@me', { status: res.status });
+      const body = await json<Partial<DiscordUser>>('users/@me', res);
+      if (typeof body.id !== 'string' || typeof body.username !== 'string') {
+        throw unavailable('users/@me', { reason: 'unexpected body' });
+      }
       return { id: body.id, username: body.username, avatar: body.avatar ?? null };
     },
 
     async getActivityInstance(instanceId) {
       const res = await call(
+        'activity-instances',
         `/applications/${encodeURIComponent(env.DISCORD_CLIENT_ID)}/activity-instances/${encodeURIComponent(instanceId)}`,
         { headers: bot },
       );
       if (res.status === 404) return null;
-      if (!res.ok) throw unavailable();
-      const body = await json<Partial<ActivityInstance>>(res);
-      if (!body.location || !Array.isArray(body.users)) throw unavailable();
+      if (!res.ok) throw unavailable('activity-instances', { status: res.status });
+      const body = await json<Partial<ActivityInstance>>('activity-instances', res);
+      if (!body.location || !Array.isArray(body.users)) {
+        throw unavailable('activity-instances', { reason: 'unexpected body' });
+      }
       return { instanceId, location: body.location, users: body.users };
     },
 
     async getMember(guildId, userId) {
       const res = await call(
+        'guild-member',
         `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}`,
         { headers: bot },
       );
       if (res.status === 404) return null;
-      if (!res.ok) throw unavailable();
-      const body = await json<Partial<GuildMember>>(res);
-      if (!Array.isArray(body.roles)) throw unavailable();
+      if (!res.ok) throw unavailable('guild-member', { status: res.status });
+      const body = await json<Partial<GuildMember>>('guild-member', res);
+      if (!Array.isArray(body.roles)) throw unavailable('guild-member', { reason: 'unexpected body' });
       return { roles: body.roles };
     },
   };

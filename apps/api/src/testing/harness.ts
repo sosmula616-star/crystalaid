@@ -5,7 +5,7 @@ import type { Env } from '@crystalaid/config';
 import { withTestDb, type Db } from '@crystalaid/database';
 import { createDiscordClient, type DiscordClient } from '../discord/client.js';
 import { buildServer } from '../http/server.js';
-import { BOT_TOKEN, CLIENT_ID, config, testEnv } from '../test-helpers.js';
+import { BOT_TOKEN, CLIENT_ID, config, recordingLog, testEnv } from '../test-helpers.js';
 import { startFakeDiscord, type FakeDiscord } from './fakeDiscord.js';
 
 export interface AppContext {
@@ -19,9 +19,12 @@ export interface AppContext {
 
 export interface AppOptions {
   redis: Redis;
-  /** Replaces the Redis and Postgres the server health-checks, for outage tests. */
+  /** The database the server uses, for outage tests. Tests still read through the test database. */
   db?: Db;
-  discord?: DiscordClient;
+  /** Builds the Discord client; by default the real one against the fake. */
+  discord?: (env: Env, fake: FakeDiscord) => DiscordClient;
+  /** Overrides for the environment, such as TRUSTED_PROXIES. */
+  env?: Partial<Env>;
   /** Runs before the server is ready, to add test routes. */
   setup?: (app: FastifyInstance) => void;
 }
@@ -37,14 +40,14 @@ export function withApp(options: AppOptions, fn: (ctx: AppContext) => Promise<vo
         cb();
       },
     });
-    const env = testEnv(fake.url);
+    const env = { ...testEnv(fake.url), ...options.env };
     const db = options.db ?? testDb;
     const app = await buildServer({
       env,
       config,
       db,
       redis: options.redis,
-      discord: options.discord ?? createDiscordClient(env),
+      discord: options.discord ? options.discord(env, fake) : createDiscordClient(env, recordingLog()),
       logStream,
     });
     options.setup?.(app);

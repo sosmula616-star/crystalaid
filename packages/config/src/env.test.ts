@@ -16,8 +16,15 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...valid, JWT_SECRET: 'short' })).toThrow(/JWT_SECRET/);
   });
 
-  it('rejects an empty TRUST_PROXY_HOPS', () => {
-    expect(() => loadEnv({ ...valid, TRUST_PROXY_HOPS: '' })).toThrow(/TRUST_PROXY_HOPS/);
+  it('rejects a malformed TRUSTED_PROXIES entry', () => {
+    for (const bad of ['nonsense', '10.0.0.0/33', '10.0.0.1, bogus', '::1/129', '10.0.0.1/']) {
+      expect(() => loadEnv({ ...valid, TRUSTED_PROXIES: bad })).toThrow(/TRUSTED_PROXIES/);
+    }
+  });
+
+  it('parses TRUSTED_PROXIES into a list of IPs and CIDRs', () => {
+    const env = loadEnv({ ...valid, TRUSTED_PROXIES: ' 10.0.0.1, 192.168.0.0/16 ,::1,fd00::/8' });
+    expect(env.TRUSTED_PROXIES).toEqual(['10.0.0.1', '192.168.0.0/16', '::1', 'fd00::/8']);
   });
 
   it('does not include secret values in the error', () => {
@@ -33,13 +40,12 @@ describe('loadEnv', () => {
   it('applies defaults', () => {
     const env = loadEnv(valid);
     expect(env.DISCORD_API_URL).toBe('https://discord.com/api/v10');
-    expect(env.TRUST_PROXY_HOPS).toBe(1);
+    expect(env.TRUSTED_PROXIES).toEqual([]);
     expect(env.PORT).toBe(3001);
   });
 
   it('coerces numeric values from strings', () => {
-    const env = loadEnv({ ...valid, PORT: '8080', TRUST_PROXY_HOPS: '2' });
+    const env = loadEnv({ ...valid, PORT: '8080' });
     expect(env.PORT).toBe(8080);
-    expect(env.TRUST_PROXY_HOPS).toBe(2);
   });
 });

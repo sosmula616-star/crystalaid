@@ -63,7 +63,7 @@ it('rejects a role id used in two lists', () => {
 it('names the file when it is missing', () => { expect(() => loadServerConfig('missing.json')).toThrow(/missing\.json/); });
 ```
 
-В `env.test.ts`: `loadEnv({ ...valid, TRUST_PROXY_HOPS: '' })` выбрасывает ошибку с `TRUST_PROXY_HOPS`; тест утечки использует `JWT_SECRET: 'short-secret-xyz'` и проверяет, что этого значения нет в ошибке.
+В `env.test.ts`: `loadEnv({ ...valid, TRUSTED_PROXIES: 'nonsense' })` выбрасывает ошибку с `TRUSTED_PROXIES`; тест утечки использует `JWT_SECRET: 'short-secret-xyz'` и проверяет, что этого значения нет в ошибке.
 
 - [ ] **Step 2: Запустить `pnpm test packages/config`.** Expected: FAIL.
 - [ ] **Step 3: Реализовать.** ID — `^\d{17,20}$`. Часовой пояс проверяется через `Intl.DateTimeFormat`. Заменить устаревший `z.string().url()` на `z.url()`. Добавить `crystalaid.config.json` в `.gitignore`.
@@ -202,7 +202,7 @@ expect(weekBounds(new Date('2026-10-27T12:00:00Z'), 'Europe/Berlin').end.toISOSt
   - `signSession(claims: { userId, discordUserId }, secret): Promise<string>`, `verifySession(token, secret)`
   - Декораторы Fastify: `requireStaff` (добавляет `request.actor: { userId, level, grants }`, читая их из базы на каждый запрос), `requirePermission(permission)`, `requireLevel(level)`, `requireService`
 
-`fakeDiscord` — Fastify-сервер на случайном порту, подставляется через `DISCORD_API_URL`. Логгер Pino с `redact` для `authorization`, `code`, `access_token`, `client_secret`, `sessionToken`, `discordAccessToken`. Лимиты: `@fastify/rate-limit` с Redis и `skipOnError: true`. `trustProxy` равен `TRUST_PROXY_HOPS`. Сервисный токен сравнивается через `timingSafeEqual`.
+`fakeDiscord` — Fastify-сервер на случайном порту, подставляется через `DISCORD_API_URL`. Логгер Pino с `redact` для `authorization`, `code`, `access_token`, `client_secret`, `sessionToken`, `discordAccessToken`. Лимиты: `@fastify/rate-limit` с Redis и `skipOnError: true`. `trustProxy` берётся из `TRUSTED_PROXIES` (список IP/CIDR; пусто — `false`). Сервисный токен сравнивается через `timingSafeEqual`.
 
 - [ ] **Step 1: Написать падающие тесты**
   - Успешный вход саппорта возвращает сессию и создаёт запись состава.

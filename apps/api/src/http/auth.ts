@@ -24,6 +24,8 @@ type Guard = (request: FastifyRequest) => Promise<void>;
 declare module 'fastify' {
   interface FastifyRequest {
     actor: Actor;
+    /** Set by `requireService`; the rate limiter skips such requests. */
+    serviceAuthenticated: boolean;
   }
   interface FastifyInstance {
     /** onRequest hook: valid session and an active staff record; sets `request.actor`. */
@@ -55,6 +57,7 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
   const { env, config, db, discord } = deps;
 
   app.decorateRequest('actor', null as unknown as Actor);
+  app.decorateRequest('serviceAuthenticated', false);
 
   app.decorate('requireStaff', async (request: FastifyRequest) => {
     const token = bearer(request);
@@ -100,6 +103,7 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
     if (!token || !timingSafeEqual(digest(token), expectedService)) {
       throw new AppError('UNAUTHORIZED', 'Invalid service token', 401);
     }
+    request.serviceAuthenticated = true;
   });
 
   app.post(
@@ -121,13 +125,15 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
         throw new AppError('INVALID_INSTANCE', 'Invalid activity instance', 403);
       }
 
+      // Taken before the roles are read: a removal event that lands while we wait is newer than
+      // `at` and wins; one applied earlier than `at` was already reflected in the roles we read.
+      const at = new Date();
       const member = await discord.getMember(guildId, me.id);
       if (!member) throw new AppError('NOT_STAFF', 'No access to the staff panel', 403);
 
-      // `at: now` makes this read count as the newest knowledge of the member's roles.
       const staff = await syncMember(
         { db, config },
-        { userId: me.id, username: me.username, avatar: me.avatar, roleIds: member.roles, at: new Date() },
+        { userId: me.id, username: me.username, avatar: me.avatar, roleIds: member.roles, at },
       );
       if (!staff || staff.status !== 'active') {
         throw new AppError('NOT_STAFF', 'No access to the staff panel', 403);
