@@ -6,7 +6,8 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "pnpm --dir packages/database run migrate"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
