@@ -29,11 +29,20 @@ describe('BotEvent', () => {
       type: 'member.snapshot',
       guildId,
       snapshotId: 's1',
-      final: true,
+      part: 1,
+      parts: 2,
       at,
       members: [{ userId, username: 'a', avatar: 'hash', roleIds: [] }],
     });
     expect(r.success).toBe(true);
+  });
+
+  it('rejects a snapshot part beyond parts or below 1', () => {
+    const base = { type: 'member.snapshot', guildId, snapshotId: 's1', at, members: [] };
+    expect(BotEvent.safeParse({ ...base, part: 3, parts: 2 }).success).toBe(false);
+    expect(BotEvent.safeParse({ ...base, part: 0, parts: 2 }).success).toBe(false);
+    expect(BotEvent.safeParse({ ...base, part: 1, parts: 0 }).success).toBe(false);
+    expect(BotEvent.safeParse({ ...base, part: 2, parts: 2 }).success).toBe(true);
   });
 
   it('rejects an unknown type', () => {

@@ -12,9 +12,7 @@
     "@crystalaid/database": "workspace:*",
     "@crystalaid/domain": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "ioredis": "^5.10.0"
-  },
-  "devDependencies": {
+    "ioredis": "^5.10.0",
     "tsx": "^4.23.15"
   }
 }

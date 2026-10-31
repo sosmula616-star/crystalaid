@@ -10,8 +10,11 @@ export const GROUP = 'workers';
 export const DEAD_STREAM = 'events:dead';
 
 const BATCH_SIZE = 50;
+const PENDING_PAGE = 50;
 const DEFAULT_MIN_IDLE_MS = 60_000;
 const DEFAULT_BLOCK_MS = 1000;
+/** An entry delivered more than this many times is moved to the dead stream. */
+export const MAX_DELIVERIES = 5;
 
 export interface ConsumerDeps {
   db: Db;
@@ -26,6 +29,7 @@ export interface ConsumerDeps {
 
 type Entry = [id: string, fields: string[]];
 type ReadReply = [stream: string, entries: Entry[]][] | null;
+type PendingRow = [id: string, consumer: string, idleMs: number, deliveries: number];
 
 async function ensureGroup(redis: Redis): Promise<void> {
   try {
@@ -35,23 +39,32 @@ async function ensureGroup(redis: Redis): Promise<void> {
   }
 }
 
-/** Entries pending longer than minIdleMs (a crashed or failed consumer) become ours. */
-async function reclaim(redis: Redis, consumer: string, minIdleMs: number): Promise<Entry[]> {
-  const pending = (await redis.xpending(STREAM, GROUP, '-', '+', BATCH_SIZE)) as [
-    string,
-    string,
-    number,
-    number,
-  ][];
-  const stale = pending.filter(([, , idle]) => idle >= minIdleMs).map(([id]) => id);
-  if (stale.length === 0) return [];
-  const claimed = (await redis.xclaim(STREAM, GROUP, consumer, minIdleMs, ...stale)) as (Entry | null)[];
-  const entries = claimed.filter((e): e is Entry => Array.isArray(e));
-  // An entry trimmed from the stream while pending comes back empty; drop it from the list.
-  const returned = new Set(entries.map(([id]) => id));
-  const gone = stale.filter((id) => !returned.has(id));
-  if (gone.length > 0) await redis.xack(STREAM, GROUP, ...gone);
-  return entries;
+/** Stream id just after `id`. Redis 5 has no exclusive range, so the sequence is incremented. */
+function nextId(id: string): string {
+  const [ms, seq] = id.split('-');
+  return `${ms}-${BigInt(seq ?? '0') + 1n}`;
+}
+
+/** Every pending entry, paged by cursor so that old entries do not hide newer ones. */
+async function allPending(redis: Redis): Promise<PendingRow[]> {
+  const rows: PendingRow[] = [];
+  let start = '-';
+  for (;;) {
+    const page = (await redis.xpending(STREAM, GROUP, start, '+', PENDING_PAGE)) as PendingRow[];
+    rows.push(...page);
+    const last = page[page.length - 1];
+    if (!last || page.length < PENDING_PAGE) return rows;
+    start = nextId(last[0]);
+  }
+}
+
+async function entryById(redis: Redis, id: string): Promise<Entry | undefined> {
+  const found = (await redis.xrange(STREAM, id, id)) as Entry[];
+  return found[0];
+}
+
+async function deadLetter(redis: Redis, id: string, raw: string | undefined, error: string): Promise<void> {
+  await redis.xadd(DEAD_STREAM, '*', 'id', id, 'event', raw ?? '', 'error', error);
 }
 
 function fieldValue(fields: string[], name: string): string | undefined {
@@ -59,8 +72,43 @@ function fieldValue(fields: string[], name: string): string | undefined {
   return undefined;
 }
 
-async function deadLetter(redis: Redis, id: string, raw: string | undefined, error: string): Promise<void> {
-  await redis.xadd(DEAD_STREAM, '*', 'id', id, 'event', raw ?? '', 'error', error);
+/**
+ * Takes over entries pending longer than minIdleMs. Entries already delivered too many times go
+ * to the dead stream instead. An entry XCLAIM did not return is acknowledged only if XRANGE
+ * shows it no longer exists; otherwise another consumer holds it and it is left alone.
+ */
+async function reclaim(deps: ConsumerDeps, consumer: string, minIdleMs: number): Promise<Entry[]> {
+  const { redis, log } = deps;
+  const stale = (await allPending(redis)).filter(([, , idle]) => idle >= minIdleMs);
+
+  const claimable: string[] = [];
+  for (const [id, , , deliveries] of stale) {
+    if (deliveries > MAX_DELIVERIES) {
+      const entry = await entryById(redis, id);
+      if (entry) {
+        log.error('event exceeded the delivery limit, moved to dead stream', { id, deliveries });
+        await deadLetter(
+          redis,
+          id,
+          fieldValue(entry[1], 'event'),
+          `delivery limit exceeded: delivered ${deliveries} times without success`,
+        );
+      }
+      await redis.xack(STREAM, GROUP, id);
+    } else if (claimable.length < BATCH_SIZE) {
+      claimable.push(id);
+    }
+  }
+  if (claimable.length === 0) return [];
+
+  const claimed = (await redis.xclaim(STREAM, GROUP, consumer, minIdleMs, ...claimable)) as (Entry | null)[];
+  const entries = claimed.filter((e): e is Entry => Array.isArray(e));
+  const returned = new Set(entries.map(([id]) => id));
+  for (const id of claimable) {
+    if (returned.has(id)) continue;
+    if (!(await entryById(redis, id))) await redis.xack(STREAM, GROUP, id);
+  }
+  return entries;
 }
 
 /**
@@ -72,7 +120,7 @@ export async function consumeBatch(deps: ConsumerDeps, consumer: string): Promis
   const { db, redis, config, log } = deps;
   await ensureGroup(redis);
 
-  const entries = await reclaim(redis, consumer, deps.minIdleMs ?? DEFAULT_MIN_IDLE_MS);
+  const entries = await reclaim(deps, consumer, deps.minIdleMs ?? DEFAULT_MIN_IDLE_MS);
   const blockMs = entries.length > 0 ? 0 : (deps.blockMs ?? DEFAULT_BLOCK_MS);
   const read = (await (blockMs > 0
     ? redis.xreadgroup('GROUP', GROUP, consumer, 'COUNT', BATCH_SIZE, 'BLOCK', blockMs, 'STREAMS', STREAM, '>')

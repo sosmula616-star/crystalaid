@@ -58,6 +58,8 @@ export const staffMembers = pgTable(
     position: text('position'),
     joinedAt: ts('joined_at').notNull().defaultNow(),
     tokenBalance: big('token_balance').notNull().default(0),
+    // Time of the newest Discord event applied; older (retried) events are skipped.
+    lastEventAt: ts('last_event_at'),
   },
   (t) => [
     unique('staff_members_guild_user_uq').on(t.guildId, t.userId),

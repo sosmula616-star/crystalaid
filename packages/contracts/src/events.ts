@@ -20,6 +20,7 @@ export const MemberRemoved = z.object({
   at: IsoDate,
 });
 
+/** One part of a full member list: `part` is 1-based, `parts` is the total number of parts. */
 export const MemberSnapshot = z.object({
   type: z.literal('member.snapshot'),
   guildId: DiscordId,
@@ -32,9 +33,10 @@ export const MemberSnapshot = z.object({
       roleIds: z.array(DiscordId),
     }),
   ),
-  final: z.boolean(),
+  part: z.number().int().min(1),
+  parts: z.number().int().min(1),
   at: IsoDate,
-});
+}).refine((e) => e.part <= e.parts, { message: 'part must not exceed parts', path: ['part'] });
 
 export const BotEvent = z.discriminatedUnion('type', [MemberUpdated, MemberRemoved, MemberSnapshot]);
 export type BotEvent = z.infer<typeof BotEvent>;

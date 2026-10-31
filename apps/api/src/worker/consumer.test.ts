@@ -110,3 +110,75 @@ describe('consumeBatch', () => {
       expect(await db.select().from(auditLog)).toHaveLength(1);
     }));
 });
+
+describe('reclaim', () => {
+  it('leaves a live entry that another consumer claimed first', () =>
+    withTestDb(async (db) => {
+      await publish(updated(10));
+      const log = recordingLog();
+      vi.spyOn(db, 'transaction').mockRejectedValueOnce(new Error('db down'));
+      await consumeBatch({ db, redis, config, log, minIdleMs: 0 }, 'c1');
+      vi.restoreAllMocks();
+      // XCLAIM returns nothing for the entry, as if another consumer had just taken it
+      vi.spyOn(redis, 'xclaim').mockResolvedValueOnce([]);
+      expect(await consumeBatch({ db, redis, config, log, minIdleMs: 0 }, 'c2')).toBe(0);
+      vi.restoreAllMocks();
+      expect(await pendingCount()).toBe(1);
+      expect(await redis.xlen('events:bot')).toBe(1);
+    }));
+
+  it('acknowledges a pending entry that no longer exists in the stream', () =>
+    withTestDb(async (db) => {
+      const id = (await publish(updated(11)))!;
+      const log = recordingLog();
+      vi.spyOn(db, 'transaction').mockRejectedValueOnce(new Error('db down'));
+      await consumeBatch({ db, redis, config, log, minIdleMs: 0 }, 'c1');
+      vi.restoreAllMocks();
+      await redis.xdel('events:bot', id);
+      expect(await pendingCount()).toBe(1);
+      await consumeBatch({ db, redis, config, log, minIdleMs: 0 }, 'c2');
+      expect(await pendingCount()).toBe(0);
+      expect(await db.select().from(staffMembers)).toHaveLength(0);
+    }));
+
+  it('moves an entry delivered more than 5 times to events:dead and acknowledges it', () =>
+    withTestDb(async (db) => {
+      await publish(updated(12));
+      const log = recordingLog();
+      vi.spyOn(db, 'transaction').mockRejectedValue(new Error('db down'));
+      for (let i = 0; i < 6; i += 1) {
+        expect(await consumeBatch({ db, redis, config, log, minIdleMs: 0 }, 'c1')).toBe(0);
+      }
+      expect(await pendingCount()).toBe(1);
+      expect(await redis.xlen('events:dead')).toBe(0);
+      vi.restoreAllMocks();
+
+      await consumeBatch({ db, redis, config, log, minIdleMs: 0 }, 'c1');
+      expect(await pendingCount()).toBe(0);
+      const dead = await redis.xrange('events:dead', '-', '+');
+      expect(dead).toHaveLength(1);
+      expect(dead[0]![1].join(' ')).toContain('delivery limit exceeded');
+      expect(dead[0]![1].join(' ')).toContain(discordId(12));
+      expect(await db.select().from(staffMembers)).toHaveLength(0);
+    }));
+
+  it('finds stale entries beyond the first 50 pending ones', () =>
+    withTestDb(async (db) => {
+      await consumeBatch({ db, redis, config, log: recordingLog(), blockMs: 0 }, 'probe'); // creates the group
+      for (let n = 100; n < 160; n += 1) await publish(updated(n));
+      // 'old' takes all 60 without handling them
+      const read = (await redis.xreadgroup('GROUP', 'workers', 'old', 'COUNT', 100, 'STREAMS', 'events:bot', '>')) as
+        | [string, [string, string[]][]][]
+        | null;
+      const ids = read![0]![1].map(([id]) => id);
+      expect(ids).toHaveLength(60);
+      await new Promise((r) => setTimeout(r, 400));
+      // the 50 oldest are touched again, so they look busy; the last 10 stay stale
+      await redis.xclaim('events:bot', 'workers', 'busy', 0, ...ids.slice(0, 50));
+
+      const n = await consumeBatch({ db, redis, config, log: recordingLog(), minIdleMs: 300, blockMs: 0 }, 'c1');
+      expect(n).toBe(10);
+      expect(await db.select().from(staffMembers)).toHaveLength(10);
+      expect(await pendingCount()).toBe(50);
+    }));
+});

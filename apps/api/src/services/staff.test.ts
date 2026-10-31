@@ -1,22 +1,8 @@
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { auditLog, careerEvents, staffMembers, users, withTestDb, type Db } from '@crystalaid/database';
-import { applySnapshot, removeMember, syncMember } from './staff.js';
-import {
-  CURATOR_ROLE,
-  GUILD,
-  SUPPORT_ROLE,
-  clearOwnedKeys,
-  config,
-  discordId,
-  memberInput,
-  recordingLog,
-  testRedis,
-} from '../test-helpers.js';
-
-const redis = testRedis();
-beforeEach(() => clearOwnedKeys(redis));
-afterAll(() => redis.quit());
+import { removeMember, syncMember } from './staff.js';
+import { CURATOR_ROLE, GUILD, SUPPORT_ROLE, config, discordId, memberInput } from '../test-helpers.js';
 
 async function staffRows(db: Db) {
   return db.select().from(staffMembers);
@@ -110,59 +96,36 @@ describe('removeMember', () => {
     }));
 });
 
-describe('applySnapshot', () => {
-  const snap = (id: string, nums: number[], final: boolean) => ({
-    type: 'member.snapshot' as const,
-    guildId: GUILD,
-    snapshotId: id,
-    members: nums.map((n) => ({ userId: discordId(n), username: `user${n}`, avatar: null, roleIds: [SUPPORT_ROLE] })),
-    final,
-    at: new Date().toISOString(),
-  });
+describe('stale events', () => {
+  const t = (s: number) => new Date(Date.UTC(2026, 10, 1, 10, 0, s));
 
-  async function statusOf(db: Db, n: number) {
-    const [row] = await db
-      .select({ status: staffMembers.status })
-      .from(staffMembers)
-      .innerJoin(users, eq(users.id, staffMembers.userId))
-      .where(eq(users.discordId, discordId(n)));
-    return row?.status;
-  }
-
-  it('deactivates only absent members and only after the final part', () =>
+  it('keeps access closed when an old member.updated is retried after a newer role removal', () =>
     withTestDb(async (db) => {
-      const deps = { db, redis, config, log: recordingLog() };
-      for (const n of [10, 11, 12]) await syncMember({ db, config }, memberInput(n, [SUPPORT_ROLE]));
-
-      await applySnapshot(deps, snap('s1', [10], false));
-      expect(await statusOf(db, 11)).toBe('active');
-      expect(await statusOf(db, 12)).toBe('active');
-      expect(await redis.scard('snapshot:s1')).toBe(1);
-      const ttl = await redis.ttl('snapshot:s1');
-      expect(ttl).toBeGreaterThan(3500);
-      expect(ttl).toBeLessThanOrEqual(3600);
-
-      await applySnapshot(deps, snap('s1', [11], true));
-      expect(await statusOf(db, 10)).toBe('active');
-      expect(await statusOf(db, 11)).toBe('active');
-      expect(await statusOf(db, 12)).toBe('inactive');
-      const audit = await db.select().from(auditLog).where(eq(auditLog.action, 'staff.deactivated'));
-      expect(audit).toHaveLength(1);
-      expect(await db.select().from(careerEvents).where(eq(careerEvents.type, 'deactivated'))).toHaveLength(1);
+      const deps = { db, config };
+      await syncMember(deps, memberInput(40, [SUPPORT_ROLE], t(1)));
+      await syncMember(deps, memberInput(40, [], t(3)));
+      const retried = await syncMember(deps, memberInput(40, [SUPPORT_ROLE], t(2)));
+      expect(retried).toMatchObject({ status: 'inactive' });
+      expect((await staffRows(db))[0]).toMatchObject({ status: 'inactive', lastEventAt: t(3) });
+      expect(await db.select().from(auditLog).where(eq(auditLog.action, 'staff.reactivated'))).toHaveLength(0);
     }));
 
-  it('creates members that appear in the snapshot', () =>
+  it('skips an old member.removed after a newer member.updated', () =>
     withTestDb(async (db) => {
-      await applySnapshot({ db, redis, config, log: recordingLog() }, snap('s2', [20], true));
-      expect(await statusOf(db, 20)).toBe('active');
+      const deps = { db, config };
+      await syncMember(deps, memberInput(41, [SUPPORT_ROLE], t(1)));
+      await syncMember(deps, memberInput(41, [SUPPORT_ROLE, CURATOR_ROLE], t(5)));
+      await removeMember(deps, discordId(41), t(3));
+      expect((await staffRows(db))[0]).toMatchObject({ status: 'active', level: 'CURATOR' });
     }));
 
-  it('deactivates nobody for an empty final snapshot and logs a warning', () =>
+  it('applies a newer event and records its time', () =>
     withTestDb(async (db) => {
-      const log = recordingLog();
-      await syncMember({ db, config }, memberInput(30, [SUPPORT_ROLE]));
-      await applySnapshot({ db, redis, config, log }, snap('s3', [], true));
-      expect(await statusOf(db, 30)).toBe('active');
-      expect(log.warns).toHaveLength(1);
+      const deps = { db, config };
+      await syncMember(deps, memberInput(42, [SUPPORT_ROLE], t(1)));
+      await syncMember(deps, memberInput(42, [SUPPORT_ROLE], t(4)));
+      expect((await staffRows(db))[0]).toMatchObject({ lastEventAt: t(4) });
+      await removeMember(deps, discordId(42), t(6));
+      expect((await staffRows(db))[0]).toMatchObject({ status: 'inactive', lastEventAt: t(6) });
     }));
 });
