@@ -21,6 +21,7 @@
 - Секреты только в env, в логах маскируются. `.env` не коммитится.
 - Новые зависимости сверх Tech Stack, `@fastify/rate-limit`, `pg`, `drizzle-kit`, `tsx` и линтера добавляются только с обоснованием в сообщении коммита.
 - Перед установкой библиотек сверять их актуальный API через документацию.
+- Локальный Redis — портативный 5.0.14 на Windows. Код использует только команды Redis 5: без `XAUTOCLAIM` (для зависших сообщений `XPENDING` + `XCLAIM`), без `SET ... GET`, ACL и Redis Functions.
 - Каждый коммит заканчивается строкой `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Prerequisites
