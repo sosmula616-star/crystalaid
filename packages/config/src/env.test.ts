@@ -16,11 +16,15 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...valid, JWT_SECRET: 'short' })).toThrow(/JWT_SECRET/);
   });
 
+  it('rejects an empty TRUST_PROXY_HOPS', () => {
+    expect(() => loadEnv({ ...valid, TRUST_PROXY_HOPS: '' })).toThrow(/TRUST_PROXY_HOPS/);
+  });
+
   it('does not include secret values in the error', () => {
     try {
-      loadEnv({ ...valid, SERVICE_TOKEN: undefined });
+      loadEnv({ ...valid, JWT_SECRET: 'short-secret-xyz' });
     } catch (e) {
-      expect(String(e)).not.toContain(valid.DISCORD_BOT_TOKEN);
+      expect(String(e)).not.toContain('short-secret-xyz');
       return;
     }
     expect.unreachable('loadEnv should have thrown');

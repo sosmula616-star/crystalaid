@@ -4,12 +4,16 @@ const schema = z.object({
   DISCORD_CLIENT_ID: z.string().min(1),
   DISCORD_CLIENT_SECRET: z.string().min(1),
   DISCORD_BOT_TOKEN: z.string().min(1),
-  DISCORD_API_URL: z.string().url().default('https://discord.com/api/v10'),
+  DISCORD_API_URL: z.url().default('https://discord.com/api/v10'),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   SERVICE_TOKEN: z.string().min(32),
-  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
+  TRUST_PROXY_HOPS: z
+    .string()
+    .regex(/^\d+$/, 'must be a non-negative integer')
+    .transform(Number)
+    .default(1),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
 });
 
