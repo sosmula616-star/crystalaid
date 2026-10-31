@@ -4,12 +4,11 @@
 
 # CrystalAid
 
-Discord-бот и Discord Activity, которые превращают активность на сервере в прогресс: XP, уровни, серии, награды, рейтинг и косметику.
+Discord-бот и Discord Activity для учёта ветки стаффа: тикеты, смены и нормы, онлайн, кадры, отчёты, зарплата в токенах и внутренний магазин.
 
-Проект в разработке, рабочего кода пока нет.
+Проект в разработке, готов только каркас монорепо.
 
-- [Спецификация](docs/superpowers/specs/2026-11-01-discord-activity-platform-design.md)
-- [План ядра](docs/superpowers/plans/2026-11-01-core-platform.md)
+- [Спецификация](docs/superpowers/specs/2026-11-01-crystalaid-staff-design.md)
 
 ## Брендинг
 
