@@ -40,10 +40,13 @@ export function startWorker(deps: WorkerDeps): Worker {
       }
     }
     log.info('worker stopping');
-    await redis.quit();
-    // QUIT is acknowledged before the socket closes; wait until the client is really finished.
-    if (redis.status !== 'end') await new Promise<void>((resolve) => redis.once('end', () => resolve()));
-    await db.$client.end();
+    try {
+      await redis.quit();
+      // QUIT is acknowledged before the socket closes; wait until the client is really finished.
+      if (redis.status !== 'end') await new Promise<void>((resolve) => redis.once('end', () => resolve()));
+    } finally {
+      await db.$client.end();
+    }
   })();
 
   return {

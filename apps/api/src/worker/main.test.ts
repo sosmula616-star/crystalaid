@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, staffMembers, withTestDb } from '@crystalaid/database';
 import { startWorker } from './main.js';
 import { GUILD, SUPPORT_ROLE, clearOwnedKeys, config, discordId, recordingLog, testRedis } from '../test-helpers.js';
@@ -42,5 +42,19 @@ describe('startWorker', () => {
       expect(log.infos).toContain('worker stopping');
       // a second stop is harmless
       await worker.stopWorker();
+    }));
+});
+
+describe('stopWorker failure', () => {
+  it('still closes the pool when redis.quit fails', () =>
+    withTestDb(async () => {
+      const db = createDb(process.env.TEST_DATABASE_URL!);
+      const redis = testRedis();
+      vi.spyOn(redis, 'quit').mockRejectedValueOnce(new Error('quit failed'));
+      const worker = startWorker({ db, redis, config, log: recordingLog(), consumer: 'w2', blockMs: 50 });
+      await expect(worker.stopWorker()).rejects.toThrow('quit failed');
+      expect(db.$client.ended).toBe(true);
+      vi.restoreAllMocks();
+      redis.disconnect();
     }));
 });

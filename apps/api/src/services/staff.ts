@@ -209,6 +209,7 @@ export async function applySnapshot(
   const base = `snapshot:${event.snapshotId}`;
   const membersKey = `${base}:members`;
   const doneKey = `${base}:done`;
+  const atKey = `${base}:at`;
   const lockKey = `${base}:lock`;
   const appliedKey = `${base}:applied`;
   const at = new Date(event.at);
@@ -226,7 +227,9 @@ export async function applySnapshot(
   if (event.members.length > 0) multi.sadd(membersKey, ...event.members.map((m) => m.userId));
   multi.sadd(doneKey, String(event.part));
   multi.expire(membersKey, SNAPSHOT_TTL_SECONDS);
+  multi.zadd(atKey, at.getTime(), String(event.part));
   multi.expire(doneKey, SNAPSHOT_TTL_SECONDS);
+  multi.expire(atKey, SNAPSHOT_TTL_SECONDS);
   const results = (await multi.exec()) ?? [];
   const failed = results.find(([err]) => err);
   if (failed?.[0]) throw failed[0];
@@ -243,25 +246,42 @@ export async function applySnapshot(
 
   const locked = await redis.set(lockKey, '1', 'EX', SNAPSHOT_LOCK_SECONDS, 'NX');
   if (locked !== 'OK') throw new Error(`snapshot ${event.snapshotId} is being applied by another worker`);
-  if (await redis.exists(appliedKey)) return;
+  try {
+    if (await redis.exists(appliedKey)) return;
 
-  const present = new Set(await redis.smembers(membersKey));
-  if (present.size === 0) {
-    log.warn('empty member snapshot, nobody deactivated', { snapshotId: event.snapshotId });
-  } else {
-    const active = await db
-      .select({ discordId: users.discordId, username: users.username, avatar: users.avatar })
-      .from(staffMembers)
-      .innerJoin(users, eq(users.id, staffMembers.userId))
-      .where(and(eq(staffMembers.guildId, config.guildId), eq(staffMembers.status, 'active')));
-    for (const u of active) {
-      if (present.has(u.discordId)) continue;
-      // A newer event for this member makes syncMember skip the stale snapshot view.
-      await syncMember(
-        { db, config },
-        { userId: u.discordId, username: u.username, avatar: u.avatar, roleIds: [], at, reason: 'not_in_snapshot' },
-      );
+    // `at` is when enumeration started, so the earliest stamp over all parts is the cut-off:
+    // any member event after it is newer than what the snapshot may have seen.
+    const [, earliest] = await redis.zrange(atKey, 0, 0, 'WITHSCORES');
+    const startedAt = earliest === undefined ? at : new Date(Number(earliest));
+
+    const present = new Set(await redis.smembers(membersKey));
+    if (present.size === 0) {
+      log.warn('empty member snapshot, nobody deactivated', { snapshotId: event.snapshotId });
+    } else {
+      const active = await db
+        .select({ discordId: users.discordId, username: users.username, avatar: users.avatar })
+        .from(staffMembers)
+        .innerJoin(users, eq(users.id, staffMembers.userId))
+        .where(and(eq(staffMembers.guildId, config.guildId), eq(staffMembers.status, 'active')));
+      for (const u of active) {
+        if (present.has(u.discordId)) continue;
+        // A newer event for this member makes syncMember skip the stale snapshot view.
+        await syncMember(
+          { db, config },
+          {
+            userId: u.discordId,
+            username: u.username,
+            avatar: u.avatar,
+            roleIds: [],
+            at: startedAt,
+            reason: 'not_in_snapshot',
+          },
+        );
+      }
     }
+    await redis.set(appliedKey, '1', 'EX', SNAPSHOT_TTL_SECONDS);
+  } finally {
+    // Release at once so a retry does not wait for the lock to expire; `applied` guards repeats.
+    await redis.del(lockKey);
   }
-  await redis.set(appliedKey, '1', 'EX', SNAPSHOT_TTL_SECONDS);
 }

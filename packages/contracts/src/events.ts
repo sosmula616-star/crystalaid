@@ -20,7 +20,10 @@ export const MemberRemoved = z.object({
   at: IsoDate,
 });
 
-/** One part of a full member list: `part` is 1-based, `parts` is the total number of parts. */
+/**
+ * One part of a full member list: `part` is 1-based, `parts` is the total number of parts.
+ * `at` is the moment enumeration of the guild started (the same or earlier for every part).
+ */
 export const MemberSnapshot = z.object({
   type: z.literal('member.snapshot'),
   guildId: DiscordId,

@@ -168,4 +168,38 @@ describe('applySnapshot', () => {
       expect(await statusOf(db, 11)).toBe('inactive');
       expect(await statusOf(db, 12)).toBe('active');
     }));
+
+  it('uses the earliest part stamp: a role gained between two parts keeps the member active', () =>
+    withTestDb(async (db) => {
+      const deps = { db, redis, config, log: recordingLog() };
+      const t1 = new Date(Date.now() - 30_000);
+      const g = new Date(t1.getTime() + 5_000);
+      const t2 = new Date(t1.getTime() + 10_000);
+      await seed(db, [10, 11], past());
+      // 12 is not staff yet; it gains the role at G, after part 1 was read and before part 2
+      await syncMember({ db, config }, memberInput(12, [SUPPORT_ROLE], g));
+      await applySnapshot(deps, snap('s10', 1, 2, [10], t1));
+      await applySnapshot(deps, snap('s10', 2, 2, [11], t2));
+      expect(await statusOf(db, 12)).toBe('active');
+      expect(await redis.zcard('snapshot:s10:at')).toBe(2);
+      expect(await redis.ttl('snapshot:s10:at')).toBeGreaterThan(3500);
+    }));
+
+  it('releases the lock when deactivation fails, and the retry sets the applied marker', () =>
+    withTestDb(async (db) => {
+      const deps = { db, redis, config, log: recordingLog() };
+      await seed(db, [10, 11, 12], past());
+      await applySnapshot(deps, snap('s11', 1, 2, [10]));
+      vi.spyOn(db, 'transaction').mockRejectedValueOnce(new Error('db down'));
+      await expect(applySnapshot(deps, snap('s11', 2, 2, []))).rejects.toThrow('db down');
+      vi.restoreAllMocks();
+      expect(await redis.exists('snapshot:s11:lock')).toBe(0);
+      expect(await redis.exists('snapshot:s11:applied')).toBe(0);
+
+      await applySnapshot(deps, snap('s11', 2, 2, []));
+      expect(await redis.exists('snapshot:s11:applied')).toBe(1);
+      expect(await statusOf(db, 10)).toBe('active');
+      expect(await statusOf(db, 11)).toBe('inactive');
+      expect(await statusOf(db, 12)).toBe('inactive');
+    }));
 });
