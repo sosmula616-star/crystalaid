@@ -125,7 +125,7 @@ expect(weekBounds(new Date('2026-10-27T12:00:00Z'), 'Europe/Berlin').end.toISOSt
 - Produces:
   - `ErrorCode`: `UNAUTHORIZED`, `TOKEN_EXPIRED`, `FORBIDDEN`, `NOT_STAFF`, `NOT_FOUND`, `VALIDATION_ERROR`, `RATE_LIMITED`, `SELF_ACTION`, `GUILD_REQUIRED`, `INVALID_INSTANCE`, `DISCORD_UNAVAILABLE`, `INTERNAL`
   - `class AppError extends Error { constructor(code: ErrorCode, message: string, status: number) }`
-  - `BotEvent`, объединение Zod по `type`: `member.updated { guildId, userId, username, avatar | null, roleIds, at }`, `member.removed { guildId, userId, at }`, `member.snapshot { guildId, snapshotId, members: Array<{ userId, username, avatar | null, roleIds }>, final: boolean, at }`
+  - `BotEvent`, объединение Zod по `type`: `member.updated { guildId, userId, username, avatar | null, roleIds, at }`, `member.removed { guildId, userId, at }`, `member.snapshot { guildId, snapshotId, part, parts, members: Array<{ userId, username, avatar | null, roleIds }>, at }`, где `at` — момент начала перечисления
   - Схемы: `ActivityAuthRequest { code, instanceId }`, `ActivityAuthResponse { sessionToken, discordAccessToken, expiresIn }`, `MeResponse { user, level, position, status, tokenBalance, permissions }`, `StaffListResponse`, `PermissionsResponse`, `PermissionsUpdate`, `SettingsSchema` со значениями по умолчанию `ticketRate: 10`, `shiftHourRate: 5`, `normBonus: 50`, `weeklyNormHours: 20`, `weeklyNormTickets: 30`, `ticketWaitMinutes: 30`, `inactivityMinutes: 30`, `inactivityReplyMinutes: 10`, `warningDays: 30`, `ticketCategories: []`, `AuditListResponse`
 
 - [ ] **Step 1: Написать падающие тесты:** `BotEvent.safeParse` принимает все 3 типа, отклоняет неизвестный `type` и событие без `guildId`; `SettingsSchema.parse({})` возвращает значения по умолчанию; отрицательная ставка отклоняется; `ActivityAuthRequest` отбрасывает лишнее поле `guildId`.
@@ -168,17 +168,17 @@ expect(weekBounds(new Date('2026-10-27T12:00:00Z'), 'Europe/Berlin').end.toISOSt
   - `getGrants(db, guildId, level): Promise<Permission[]>`
   - `updateGrants(db, actor, level: 'SUPPORT' | 'CURATOR', grants: Permission[]): Promise<void>`
   - `consumeBatch(deps: { db, redis, config, log }, consumer: string): Promise<number>`, stream `events:bot`, group `workers`
-  - Запуск `node dist/main.js worker`; роль `api` подключается в задаче 6.
+  - Запуск `pnpm --dir apps/api run worker` через tsx, в том числе на хостинге; роль `api` подключается в задаче 6.
 
-`syncMember` записывает `career_events` и `audit_log` при появлении, смене уровня и деактивации, `actor_user_id` при этом `null`. Для пользователя с `NONE` без записи в составе ничего не создаётся. `applySnapshot` собирает ID в Redis-множество `snapshot:{id}` со сроком 1 час; деактивация отсутствующих выполняется только при `final: true` и непустом множестве.
+`syncMember` записывает `career_events` и `audit_log` при появлении, смене уровня и деактивации, `actor_user_id` при этом `null`. Для пользователя с `NONE` без записи в составе ничего не создаётся. `applySnapshot` деактивирует отсутствующих только после записи всех частей `parts`, под блокировкой на снимок, с меткой применения и проверкой `last_event_at`.
 
 - [ ] **Step 1: Написать падающие тесты**
   - Новая роль саппорта создаёт активную запись `SUPPORT`; повтор ничего не меняет и не пишет журнал.
   - Куратор без роли саппорта переводится в `inactive`, журнал содержит причину `level_changed`.
   - Возврат роли восстанавливает запись с прежним балансом.
   - `updateGrants` пишет журнал; неизвестное право даёт `VALIDATION_ERROR`; актор ниже `ADMIN` получает `FORBIDDEN`.
-  - Снимок из двух частей деактивирует только отсутствующих, и только после части с `final: true`.
-  - Review Focus 3: пустой снимок с `final: true` не деактивирует никого и пишет предупреждение в лог.
+  - Снимок из двух частей деактивирует только отсутствующих и только после записи всех частей.
+  - Review Focus 3: пустой полный снимок не деактивирует никого и пишет предупреждение в лог.
   - Событие из stream обработано и подтверждено (`XPENDING` равен 0).
   - Review Focus 5: некорректный JSON и событие, не прошедшее схему, попадают в `events:dead`, подтверждаются, следующее событие обрабатывается.
   - Ошибка базы оставляет событие неподтверждённым; повторная обработка не создаёт дублей.
