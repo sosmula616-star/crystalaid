@@ -1,5 +1,5 @@
 import { Redis } from 'ioredis';
-import type { ServerConfig } from '@crystalaid/config';
+import type { Env, ServerConfig } from '@crystalaid/config';
 import type { Logger } from './log.js';
 
 export const GUILD = '100000000000000001';
@@ -50,6 +50,27 @@ export function testRedis(): Redis {
 }
 
 export async function clearOwnedKeys(redis: Redis): Promise<void> {
-  const snapshots = await redis.keys('snapshot:*');
-  await redis.del('events:bot', 'events:dead', ...snapshots);
+  const owned = [...(await redis.keys('snapshot:*')), ...(await redis.keys('ratelimit:*'))];
+  await redis.del('events:bot', 'events:dead', ...owned);
+}
+
+export const CLIENT_ID = '300000000000000001';
+export const CLIENT_SECRET = 'client-secret-value-9f3a';
+export const BOT_TOKEN = 'bot-token-value-7c1e';
+export const JWT_SECRET = 'jwt-secret-for-tests-0123456789abcdef';
+export const SERVICE_TOKEN = 'service-token-for-tests-0123456789abcd';
+
+export function testEnv(discordApiUrl: string): Env {
+  return {
+    DISCORD_CLIENT_ID: CLIENT_ID,
+    DISCORD_CLIENT_SECRET: CLIENT_SECRET,
+    DISCORD_BOT_TOKEN: BOT_TOKEN,
+    DISCORD_API_URL: discordApiUrl,
+    DATABASE_URL: 'postgres://unused',
+    REDIS_URL: 'redis://unused',
+    JWT_SECRET,
+    SERVICE_TOKEN,
+    TRUST_PROXY_HOPS: 1,
+    PORT: 3001,
+  };
 }

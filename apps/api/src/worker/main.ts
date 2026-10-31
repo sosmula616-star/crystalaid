@@ -72,7 +72,10 @@ export async function runWorker(): Promise<void> {
   const consumer = `${hostname()}-${process.pid}`;
 
   const worker = startWorker({ db, redis, config, log, consumer });
-  const stop = () => void worker.stopWorker();
+  const stop = () =>
+    void worker
+      .stopWorker()
+      .catch((err: unknown) => log.error('worker shutdown failed', { error: err instanceof Error ? err.message : String(err) }));
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
 
