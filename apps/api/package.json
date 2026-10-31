@@ -1,0 +1,20 @@
+{
+  "name": "@crystalaid/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "worker": "tsx src/main.ts worker"
+  },
+  "dependencies": {
+    "@crystalaid/config": "workspace:*",
+    "@crystalaid/contracts": "workspace:*",
+    "@crystalaid/database": "workspace:*",
+    "@crystalaid/domain": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "ioredis": "^5.10.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}
