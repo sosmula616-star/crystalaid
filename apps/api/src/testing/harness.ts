@@ -27,6 +27,8 @@ export interface AppOptions {
   env?: Partial<Env>;
   /** Runs before the server is ready, to add test routes. */
   setup?: (app: FastifyInstance) => void;
+  /** Serve a built Activity, as when ACTIVITY_DIST is set. */
+  activity?: { dir: string; clientId: string };
 }
 
 /** A server wired to the test database, a fake Discord and a log capture. */
@@ -49,6 +51,7 @@ export function withApp(options: AppOptions, fn: (ctx: AppContext) => Promise<vo
       redis: options.redis,
       discord: options.discord ? options.discord(env, fake) : createDiscordClient(env, recordingLog()),
       logStream,
+      ...(options.activity ? { activity: options.activity } : {}),
     });
     options.setup?.(app);
     try {

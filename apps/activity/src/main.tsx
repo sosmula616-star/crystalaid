@@ -8,6 +8,7 @@ import { App } from './App.js';
 import { createApiClient } from './api/client.js';
 import { createDiscordPort } from './auth/discord.js';
 import { createSession } from './auth/session.js';
+import { readClientId } from './runtime-config.js';
 import { THEME_KEY } from './storage-keys.js';
 
 
@@ -34,7 +35,7 @@ async function start() {
       ? (await import('./dev/mock.js')).createMock(new URLSearchParams(location.search))
       : null;
 
-  const sdk = mock?.sdk ?? createDiscordPort(import.meta.env.VITE_DISCORD_CLIENT_ID);
+  const sdk = mock?.sdk ?? createDiscordPort(readClientId());
 
   // The client and the session need each other: the client asks the session to
   // refresh, the session logs in through the client.

@@ -17,6 +17,7 @@ import { registerMe } from './routes/me.js';
 import { registerPermissions } from './routes/permissions.js';
 import { registerSettings } from './routes/settings.js';
 import { registerStaff } from './routes/staff.js';
+import { registerStatic } from './static.js';
 
 export interface ServerDeps {
   env: Env;
@@ -26,6 +27,8 @@ export interface ServerDeps {
   discord: DiscordClient;
   /** Where Pino writes; stdout when omitted. Tests pass a stream to capture the log. */
   logStream?: Writable;
+  /** Serve the built Activity from this directory at `/`; the id goes into index.html. */
+  activity?: { dir: string; clientId: string };
 }
 
 const SENSITIVE = [
@@ -64,6 +67,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // The id comes from the server only, so a client cannot forge log correlation.
     requestIdHeader: false,
     genReqId: () => randomUUID(),
+    // Discord's URL Mapping sends `/` here, so the client's `/api/x` arrives as `/api/x`: serve it as `/x`.
+    rewriteUrl: (req) => {
+      const url = req.url ?? '/';
+      if (!/^\/api(?=[/?]|$)/.test(url)) return url;
+      const rest = url.slice('/api'.length);
+      return rest.startsWith('/') ? rest : `/${rest}`;
+    },
   });
 
   registerErrorHandling(app);
@@ -77,6 +87,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   registerSettings(app, routeDeps);
   registerAudit(app, routeDeps);
   registerInternal(app, { ...routeDeps, redis });
+  if (deps.activity) await registerStatic(app, deps.activity);
   return app;
 }
 
@@ -113,7 +124,15 @@ export async function runApi(): Promise<void> {
   redis.on('error', (err) => log.error('redis error', { error: err.message }));
 
   await ensureSeeded(db, config.guildId);
-  const app = await buildServer({ env, config, db, redis, discord: createDiscordClient(env, log) });
+  const dist = process.env.ACTIVITY_DIST;
+  const app = await buildServer({
+    env,
+    config,
+    db,
+    redis,
+    discord: createDiscordClient(env, log),
+    ...(dist ? { activity: { dir: dist, clientId: env.DISCORD_CLIENT_ID } } : {}),
+  });
   const shutdown = createShutdown(
     {
       close: () => app.close(),

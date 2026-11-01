@@ -6,7 +6,9 @@ const here = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig(({ command, mode }) => {
   // The id is baked into the bundle. An empty one would build fine and then fail only inside Discord.
-  if (command === 'build' && mode !== 'mock') {
+  // The Docker image sets CRYSTALAID_RUNTIME_CLIENT_ID=1 instead: the API injects the real id into
+  // index.html when it serves the page, so the build gets only a placeholder.
+  if (command === 'build' && mode !== 'mock' && process.env.CRYSTALAID_RUNTIME_CLIENT_ID !== '1') {
     const clientId = loadEnv(mode, fileURLToPath(new URL('../..', import.meta.url)), 'VITE_DISCORD_CLIENT_ID').VITE_DISCORD_CLIENT_ID;
     if (!clientId?.trim()) {
       throw new Error(
