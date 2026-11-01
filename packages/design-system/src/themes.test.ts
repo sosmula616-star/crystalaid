@@ -71,6 +71,13 @@ describe('THEMES', () => {
   });
 });
 
+describe('themes.css fallback', () => {
+  it('applies the crystal values to :root as well', () => {
+    const css = readFileSync(new URL('./themes.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/:root,\s*\[data-theme='crystal'\]\s*\{/);
+  });
+});
+
 describe('applyTheme', () => {
   const makeRoot = () => ({ dataset: {} as Record<string, string> });
 

@@ -1,5 +1,6 @@
 /* Keep in sync with themes.ts; a test enforces it. Hex colors are allowed only here and in tokens.css. */
 
+:root,
 [data-theme='crystal'] {
   --color-background: #0B1220;
   --color-surface: #111A2C;
