@@ -53,7 +53,7 @@ describe('parseServerConfig', () => {
   });
 
   it('allows admins by user id with no admin role', () => {
-    const { admin: _admin, ...roles } = valid.roles;
+    const roles = { support: valid.roles.support, curator: valid.roles.curator };
     const parsed = parse({ ...valid, roles, users: { admins: [C], developers: [] } });
     expect(parsed.roles.admin).toEqual([]);
     expect(parsed.users.admins).toEqual([C]);
