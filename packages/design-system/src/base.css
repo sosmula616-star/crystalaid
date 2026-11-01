@@ -1,0 +1,9 @@
+/* The page itself: no browser margin, so the app measures the real window width. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font: var(--text-body);
+}

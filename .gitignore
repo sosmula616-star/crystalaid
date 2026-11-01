@@ -12,3 +12,7 @@ coverage/
 .superpowers/
 
 crystalaid.config.json
+
+# Playwright
+apps/activity/e2e/screenshots/
+apps/activity/e2e/.results/

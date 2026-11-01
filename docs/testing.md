@@ -20,3 +20,15 @@ pnpm test
 ## Длинный путь на Windows
 
 Если путь к репозиторию длиннее 260 символов, на Windows ломаются esbuild (он нужен tsx и drizzle-kit) и `pnpm --filter`. Признаки: `ENOENT` при запуске `esbuild.exe`, ошибка записи состояния задач у `pnpm --filter`. Решение: клонировать в короткий путь. Обход: скопировать `esbuild.exe` в короткую папку, задать `ESBUILD_BINARY_PATH` и вызывать `pnpm --dir <пакет> run <скрипт>` вместо `--filter`.
+
+## Браузерные тесты Activity
+
+Playwright (только Chromium) проверяет раскладку, доступность и сборку Activity. Базы данных и Redis не нужны.
+
+```
+pnpm install --frozen-lockfile
+pnpm --dir apps/activity exec playwright install chromium   # один раз
+pnpm --dir apps/activity run test:e2e
+```
+
+Playwright сам запускает `vite --mode mock --host 127.0.0.1 --port 4173` и останавливает его. Тесты лежат в `apps/activity/e2e` (`*.spec.ts`), Vitest их не берёт. Снимки экрана пишутся в `apps/activity/e2e/screenshots` (в git не попадают). Подробности: [responsive.md](responsive.md).

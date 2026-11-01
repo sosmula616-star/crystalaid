@@ -4,7 +4,8 @@
   right: 0;
   bottom: 0;
   z-index: var(--layer-toast);
-  pointer-events: auto;
+  /* The stack spans the screen edge but must not block what is under its empty part (the bottom bar). */
+  pointer-events: none;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -28,6 +29,8 @@
 }
 
 .toast {
+  /* The viewport lets clicks through; a toast itself stays clickable, also over a modal dialog. */
+  pointer-events: auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;

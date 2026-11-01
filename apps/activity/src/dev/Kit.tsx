@@ -53,6 +53,17 @@ const ROWS: Person[] = [
   { id: '3', name: 'Ilya Brandt', level: 'Админ', tickets: 5 },
 ];
 
+interface Wide {
+  id: string;
+  name: string;
+  note: string;
+  amount: number;
+}
+
+const WIDE_ROWS: Wide[] = [
+  { id: 'w1', name: 'Konstantina-Aleksandrovna-Wilhelmina', note: 'x'.repeat(40), amount: 1000000000 },
+];
+
 function ToastButton() {
   const toast = useToast();
   return (
@@ -74,6 +85,8 @@ function Demo() {
   const [modal, setModal] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
+  const panelMenuRef = useRef<HTMLButtonElement>(null);
+  const [modalSelect, setModalSelect] = useState('ru');
 
   return (
     <div className={styles.kit}>
@@ -221,6 +234,21 @@ function Demo() {
           />
         </Group>
 
+        <Group title="Длинные значения">
+          <Table<Wide>
+            caption="Длинные значения"
+            expandLabel="Подробнее"
+            rowKey={(row) => row.id}
+            empty={<EmptyState title="Нет строк" />}
+            columns={[
+              { id: 'name', header: 'Имя', priority: 'primary', render: (row) => row.name },
+              { id: 'note', header: 'Заметка', priority: 'secondary', render: (row) => row.note },
+              { id: 'amount', header: 'Сумма', priority: 'secondary', render: (row) => row.amount },
+            ]}
+            rows={WIDE_ROWS}
+          />
+        </Group>
+
         <Group title="Наложения">
           <div className={styles.row}>
             <Dropdown
@@ -249,6 +277,16 @@ function Demo() {
             returnFocusRef={menuRef}
           >
             <p>Содержимое окна.</p>
+            <Select
+              label="Язык в окне"
+              value={modalSelect}
+              onChange={setModalSelect}
+              options={[
+                { value: 'ru', label: 'Русский' },
+                { value: 'en', label: 'English' },
+              ]}
+            />
+            <ToastButton />
           </Modal>
           <Drawer
             open={drawer}
@@ -259,6 +297,21 @@ function Demo() {
             returnFocusRef={menuRef}
           >
             <p>Содержимое панели.</p>
+            <div className={styles.row}>
+              <Dropdown
+                triggerRef={panelMenuRef}
+                trigger={<Button variant="secondary">Меню в панели</Button>}
+                items={[
+                  { id: 'a', label: 'Первый пункт', onSelect: () => {} },
+                  { id: 'b', label: 'Второй пункт', onSelect: () => {} },
+                ]}
+              />
+              <Tooltip content="Подсказка в панели">
+                <IconButton label="Справка в панели">
+                  <Bell size={20} aria-hidden="true" />
+                </IconButton>
+              </Tooltip>
+            </div>
           </Drawer>
         </Group>
       </div>
