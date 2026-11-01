@@ -15,7 +15,7 @@ export { Select, type SelectOption, type SelectProps } from './components/Select
 export { Checkbox, type CheckboxProps } from './components/Checkbox/Checkbox.js';
 export { Toggle, type ToggleProps } from './components/Toggle/Toggle.js';
 export { Tabs, type TabItem, type TabsProps } from './components/Tabs/Tabs.js';
-export { Tooltip, type TooltipProps } from './components/Tooltip/Tooltip.js';
+export { Tooltip, TooltipProvider, type TooltipProps } from './components/Tooltip/Tooltip.js';
 export { Dropdown, type DropdownItem, type DropdownProps } from './components/Dropdown/Dropdown.js';
 export { Modal, type ModalProps } from './components/Modal/Modal.js';
 export { Drawer, type DrawerProps } from './components/Drawer/Drawer.js';

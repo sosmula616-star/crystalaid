@@ -22,6 +22,11 @@ describe('Input', () => {
     expect(ids).toContain(screen.getByText('Shown to staff').id);
   });
 
+  it('announces the error text as an alert', () => {
+    render(<Input label="Name" error="Required" />);
+    expect(screen.getByRole('alert').textContent).toBe('Required');
+  });
+
   it('hides the label visually but keeps the accessible name', () => {
     render(<Input label="Search" hideLabel />);
     expect(screen.getByRole('textbox', { name: 'Search' })).toBeTruthy();

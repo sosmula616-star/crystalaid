@@ -34,6 +34,18 @@ describe('Dropdown', () => {
     expect(onSecond).not.toHaveBeenCalled();
   });
 
+  it('never focuses a disabled item while moving through the menu', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    await screen.findByRole('menu');
+    const disabled = screen.getByRole('menuitem', { name: 'Archive' });
+    expect(disabled.getAttribute('aria-disabled')).toBe('true');
+    for (const key of ['{ArrowDown}', '{ArrowDown}', '{ArrowDown}', '{ArrowUp}', '{ArrowUp}', '{ArrowUp}']) {
+      await userEvent.keyboard(key);
+      expect(document.activeElement).not.toBe(disabled);
+    }
+  });
+
   it('selects by click and closes', async () => {
     const { onFirst } = setup();
     await userEvent.click(screen.getByRole('button', { name: 'Actions' }));

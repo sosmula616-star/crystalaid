@@ -2,7 +2,7 @@
   position: fixed;
   top: 50%;
   left: 50%;
-  z-index: 101;
+  z-index: var(--layer-dialog);
   width: min(480px, calc(100dvw - var(--space-6)));
   max-height: calc(100dvh - var(--space-6));
   border-radius: var(--radius-6);

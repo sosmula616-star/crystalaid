@@ -4,7 +4,7 @@
 }
 
 .content {
-  z-index: 100;
+  z-index: var(--layer-popper);
   min-width: var(--radix-select-trigger-width);
   max-height: min(var(--radix-select-content-available-height), 320px);
   overflow: hidden;

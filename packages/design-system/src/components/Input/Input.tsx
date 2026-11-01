@@ -37,7 +37,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         </span>
       ) : null}
       {error ? (
-        <span id={errorId} className={fieldStyles.error}>
+        <span id={errorId} role="alert" className={fieldStyles.error}>
           {error}
         </span>
       ) : null}

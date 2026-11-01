@@ -62,6 +62,22 @@ describe('Modal', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('omits the description and aria-describedby when none is given', async () => {
+    function NoDesc() {
+      const [open, setOpen] = useState(true);
+      return (
+        <Modal open={open} onOpenChange={setOpen} title="Settings">
+          <button type="button">Inside</button>
+        </Modal>
+      );
+    }
+    render(<NoDesc />);
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    expect(dialog.hasAttribute('aria-describedby')).toBe(false);
+    expect(dialog.querySelector('p')).toBeNull();
+    await expectNoA11yViolations(document.body);
+  });
+
   it('has no a11y violations when open', async () => {
     render(<Harness />);
     await openIt();

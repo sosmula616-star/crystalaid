@@ -33,6 +33,14 @@ describe('Select', () => {
     expect(screen.getByText('Rank').className).toMatch(/srOnly/);
   });
 
+  it('rejects an option with an empty value', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() =>
+      render(<Select label="Rank" value="a" onChange={() => {}} options={[{ value: '', label: 'None' }]} />),
+    ).toThrow(/value ""/);
+    quiet.mockRestore();
+  });
+
   it('has no a11y violations when open', async () => {
     render(<Select label="Rank" value="a" onChange={() => {}} options={options} />);
     await userEvent.click(screen.getByRole('combobox', { name: 'Rank' }));

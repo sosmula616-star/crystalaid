@@ -38,6 +38,11 @@
 
   --touch-target: 40px;
 
+  --layer-overlay: 100;
+  --layer-dialog: 110;
+  --layer-popper: 120;
+  --layer-toast: 130;
+
   font-variant-numeric: tabular-nums;
 }
 

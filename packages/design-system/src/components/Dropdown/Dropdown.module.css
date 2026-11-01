@@ -1,5 +1,5 @@
 .content {
-  z-index: 100;
+  z-index: var(--layer-popper);
   min-width: 160px;
   max-width: calc(100dvw - var(--space-6));
   max-height: var(--radix-dropdown-menu-content-available-height);

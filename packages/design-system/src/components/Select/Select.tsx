@@ -22,6 +22,10 @@ export interface SelectProps {
 
 export function Select({ label, value, onChange, options, hideLabel = false, disabled, placeholder }: SelectProps) {
   const id = useId();
+  if (options.some((option) => option.value === '')) {
+    // Radix reserves the empty string for "no selection".
+    throw new Error('Select: an option with value "" is not allowed; use a non-empty value.');
+  }
   return (
     <div className={fieldStyles.field}>
       <label htmlFor={id} className={hideLabel ? fieldStyles.srOnly : fieldStyles.label}>
