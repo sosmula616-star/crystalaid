@@ -15,6 +15,7 @@ export interface RecordedRequest {
   method: string;
   url: string;
   authorization: string | undefined;
+  userAgent: string | undefined;
   body: unknown;
 }
 
@@ -80,6 +81,7 @@ export async function startFakeDiscord(botToken: string, applicationId: string):
       method: request.method,
       url: request.url,
       authorization: request.headers.authorization,
+      userAgent: request.headers['user-agent'],
       body: undefined,
     });
     const hit = failures.find(([match]) => request.url.includes(match));

@@ -10,7 +10,7 @@ Discord-бот и Discord Activity для учёта ветки стаффа: т
 
 ## Запуск
 
-Нужны PostgreSQL, Redis 5+, `.env` (образец `.env.example`) и `crystalaid.config.json` (образец `crystalaid.config.example.json`).
+Нужны PostgreSQL, Redis 5+ с паролем, `.env` в корне (образец `.env.example`) и `crystalaid.config.json` (образец `crystalaid.config.example.json`). API, worker и `pnpm db:migrate` читают корневой `.env` сами; переменные из настоящего окружения сильнее файла. Локальные PostgreSQL и Redis поднимает `docker compose up -d` (пароли `POSTGRES_PASSWORD` и `REDIS_PASSWORD` берутся из `.env`, порты открыты только на `127.0.0.1`).
 
 ```
 pnpm install --frozen-lockfile

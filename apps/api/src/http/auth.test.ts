@@ -3,9 +3,9 @@ import { SignJWT } from 'jose';
 import { eq } from 'drizzle-orm';
 import { ActivityAuthResponse } from '@crystalaid/contracts';
 import { rolePermissions, staffMembers, users } from '@crystalaid/database';
-import { createDiscordClient } from '../discord/client.js';
+import { USER_AGENT, createDiscordClient } from '../discord/client.js';
 import { clientKey } from './rateLimit.js';
-import { removeMember } from '../services/staff.js';
+import { removeMember, syncMember } from '../services/staff.js';
 import { signSession, verifySession } from '../services/session.js';
 import { withApp } from '../testing/harness.js';
 import {
@@ -20,6 +20,7 @@ import {
   clearOwnedKeys,
   config,
   discordId,
+  memberInput,
   recordingLog,
   testEnv,
   testRedis,
@@ -56,6 +57,9 @@ describe('POST /auth/activity', () => {
       expect(auth('/activity-instances/')).toMatch(/^Bot /);
       expect(auth('/members/')).toMatch(/^Bot /);
       expect(auth('/users/@me')).toBe('Bearer access-c1');
+      // every call to Discord identifies the bot
+      expect(fake.requests.length).toBeGreaterThanOrEqual(4);
+      for (const r of fake.requests) expect(r.userAgent).toBe(USER_AGENT);
     }));
 
   it('puts no level or permissions into the token', () =>
@@ -117,6 +121,8 @@ describe('POST /auth/activity', () => {
         const res = await app.inject({ method: 'POST', url: '/auth/activity', payload: login(`c${n}`, `i${n}`) });
         expect(res.statusCode).toBe(403);
         expect(res.json().error.code).toBe('NOT_STAFF');
+        // only the curator without the support role is told what is missing
+        expect(/support role is missing/.test(res.json().error.message)).toBe(n === 2);
       }
       expect(await db.select().from(staffMembers)).toHaveLength(0);
     }));
@@ -365,6 +371,23 @@ describe('guards', () => {
       res = await get(ctx, '/whoami', token);
       expect(res.statusCode).toBe(403);
       expect(res.json().error.code).toBe('NOT_STAFF');
+    }));
+
+  it('requireStaff says that the support role is missing for a curator who lost it, and only then', () =>
+    withApp({ redis, setup }, async (ctx) => {
+      const curator = await loginAs(ctx, 1, [SUPPORT_ROLE, CURATOR_ROLE]);
+      const other = await loginAs(ctx, 2, [SUPPORT_ROLE]);
+      for (const [n, roles] of [[1, [CURATOR_ROLE]], [2, []]] as const) {
+        await syncMember({ db: ctx.db, config }, memberInput(n, [...roles], new Date(Date.now() + 1000)));
+      }
+      const a = await get(ctx, '/whoami', curator.token);
+      expect(a.statusCode).toBe(403);
+      expect(a.json().error.code).toBe('NOT_STAFF');
+      expect(a.json().error.message).toMatch(/support role is missing/);
+      const b = await get(ctx, '/whoami', other.token);
+      expect(b.statusCode).toBe(403);
+      expect(b.json().error.code).toBe('NOT_STAFF');
+      expect(b.json().error.message).not.toMatch(/support role/);
     }));
 
   it('answers TOKEN_EXPIRED for an expired token and UNAUTHORIZED for a forged or missing one', () =>

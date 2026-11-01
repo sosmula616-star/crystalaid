@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { auditLog, careerEvents, staffMembers, users, withTestDb, type Db } from '@crystalaid/database';
 import { removeMember, syncMember } from './staff.js';
@@ -127,5 +127,53 @@ describe('stale events', () => {
       expect((await staffRows(db))[0]).toMatchObject({ lastEventAt: t(4) });
       await removeMember(deps, discordId(42), t(6));
       expect((await staffRows(db))[0]).toMatchObject({ status: 'inactive', lastEventAt: t(6) });
+    }));
+});
+
+describe('inactive level', () => {
+  it('stores NONE for an inactive row and keeps the prior level in career_events', () =>
+    withTestDb(async (db) => {
+      const deps = { db, config };
+      await syncMember(deps, memberInput(60, [SUPPORT_ROLE, CURATOR_ROLE], new Date(Date.UTC(2026, 10, 1, 10, 0, 1))));
+      await syncMember(deps, memberInput(61, [SUPPORT_ROLE], new Date(Date.UTC(2026, 10, 1, 10, 0, 1))));
+      await syncMember(deps, memberInput(60, [], new Date(Date.UTC(2026, 10, 1, 10, 0, 2))));
+      await removeMember(deps, discordId(61), new Date(Date.UTC(2026, 10, 1, 10, 0, 2)));
+      const rows = await staffRows(db);
+      expect(rows).toHaveLength(2);
+      for (const r of rows) expect(r).toMatchObject({ status: 'inactive', level: 'NONE' });
+      const events = await db.select().from(careerEvents).where(eq(careerEvents.type, 'deactivated'));
+      expect(events.map((e) => (e.data as { level: string }).level).sort()).toEqual(['CURATOR', 'SUPPORT']);
+
+      // coming back sets the level again
+      const back = await syncMember(deps, memberInput(60, [SUPPORT_ROLE], new Date(Date.UTC(2026, 10, 1, 10, 0, 3))));
+      expect(back).toMatchObject({ status: 'active', level: 'SUPPORT' });
+    }));
+
+  it('flags a deactivation caused by a missing support role', () =>
+    withTestDb(async (db) => {
+      const deps = { db, config };
+      await syncMember(deps, memberInput(62, [SUPPORT_ROLE, CURATOR_ROLE], new Date(Date.UTC(2026, 10, 1, 10, 0, 1))));
+      await syncMember(deps, memberInput(62, [CURATOR_ROLE], new Date(Date.UTC(2026, 10, 1, 10, 0, 2))));
+      const [event] = await db.select().from(careerEvents).where(eq(careerEvents.type, 'deactivated'));
+      expect(event!.data).toMatchObject({ level: 'CURATOR', supportRoleMissing: true });
+    }));
+});
+
+describe('first sync race', () => {
+  it('lets parallel first syncs of one person succeed with one user, one staff row and one joined record', () =>
+    withTestDb(async (db) => {
+      const deps = { db, config };
+      const at = new Date();
+      // warm the pool so that the syncs really run side by side
+      await Promise.all(Array.from({ length: 8 }, () => db.execute(sql`select 1`)));
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () => syncMember(deps, memberInput(70, [SUPPORT_ROLE], at))),
+      );
+      expect(results.map((r) => r.status)).toEqual(Array(8).fill('fulfilled'));
+      for (const r of results) expect((r as PromiseFulfilledResult<unknown>).value).toMatchObject({ level: 'SUPPORT' });
+      expect(await db.select().from(users)).toHaveLength(1);
+      expect(await staffRows(db)).toHaveLength(1);
+      expect(await db.select().from(careerEvents).where(eq(careerEvents.type, 'joined'))).toHaveLength(1);
+      expect(await db.select().from(auditLog).where(eq(auditLog.action, 'staff.joined'))).toHaveLength(1);
     }));
 });

@@ -29,16 +29,20 @@ export interface SyncInput {
 
 const SNAPSHOT_TTL_SECONDS = 3600;
 const SNAPSHOT_LOCK_SECONDS = 60;
+/** A snapshot may deactivate more than half of the active staff only below this many people. */
+const SNAPSHOT_MASS_DEACTIVATION_MIN = 3;
 
 async function deactivate(
   tx: Tx,
   staff: StaffMember,
   at: Date,
   reason: string,
+  supportRoleMissing = false,
 ): Promise<StaffMember> {
+  // An inactive row has no level; the level it had stays in the career event and the audit row.
   const [row] = await tx
     .update(staffMembers)
-    .set({ status: 'inactive', lastEventAt: at })
+    .set({ status: 'inactive', level: 'NONE', lastEventAt: at })
     .where(eq(staffMembers.id, staff.id))
     .returning();
   await tx.insert(careerEvents).values({
@@ -46,7 +50,7 @@ async function deactivate(
     userId: staff.userId,
     type: 'deactivated',
     actorUserId: null,
-    data: { level: staff.level, reason },
+    data: { level: staff.level, reason, ...(supportRoleMissing ? { supportRoleMissing } : {}) },
     createdAt: at,
   });
   await writeAudit(tx, {
@@ -55,7 +59,7 @@ async function deactivate(
     action: 'staff.deactivated',
     targetUserId: staff.userId,
     reason,
-    data: { level: staff.level },
+    data: { level: staff.level, ...(supportRoleMissing ? { supportRoleMissing } : {}) },
   });
   return row!;
 }
@@ -100,23 +104,28 @@ export async function syncMember(deps: StaffDeps, input: SyncInput): Promise<Sta
   const level = resolveLevel(input.roleIds, config.roles);
 
   return db.transaction(async (tx) => {
-    let [user] = await tx.select().from(users).where(eq(users.discordId, input.userId));
-    let staff: StaffMember | undefined;
-    if (user) {
-      [staff] = await tx
+    const selectStaff = (userId: string) =>
+      tx
         .select()
         .from(staffMembers)
-        .where(and(eq(staffMembers.guildId, guildId), eq(staffMembers.userId, user.id)))
-        .for('update');
-    }
+        .where(and(eq(staffMembers.guildId, guildId), eq(staffMembers.userId, userId)))
+        .for('update')
+        .then((rows) => rows[0]);
+
+    let [user] = await tx.select().from(users).where(eq(users.discordId, input.userId));
+    let staff: StaffMember | undefined;
+    if (user) staff = await selectStaff(user.id);
     if (staff && isStale(staff, input.at)) return staff;
     if (level === 'NONE' && !staff) return null;
 
     if (!user) {
+      // Two first syncs of one person can race; the loser of the insert reads the winner's row.
       [user] = await tx
         .insert(users)
         .values({ discordId: input.userId, username: input.username, avatar: input.avatar })
+        .onConflictDoNothing()
         .returning();
+      if (!user) [user] = await tx.select().from(users).where(eq(users.discordId, input.userId));
     } else if (user.username !== input.username || user.avatar !== input.avatar) {
       await tx
         .update(users)
@@ -129,20 +138,32 @@ export async function syncMember(deps: StaffDeps, input: SyncInput): Promise<Sta
       const [row] = await tx
         .insert(staffMembers)
         .values({ guildId, userId, level, status: 'active', joinedAt: input.at, lastEventAt: input.at })
+        .onConflictDoNothing()
         .returning();
-      await recordChange(tx, { guildId, userId }, 'joined', input.at, { level });
-      return row!;
+      if (row) {
+        await recordChange(tx, { guildId, userId }, 'joined', input.at, { level });
+        return row;
+      }
+      // A parallel first sync created the row; carry on as for an existing member.
+      staff = await selectStaff(userId);
+      if (!staff) throw new Error('staff record vanished during first sync');
+      if (isStale(staff, input.at)) return staff;
     }
 
     if (level === 'NONE') {
-      if (staff.status === 'active') return deactivate(tx, staff, input.at, input.reason ?? 'level_changed');
+      if (staff.status === 'active') {
+        const supportRoleMissing =
+          !input.roleIds.some((id) => config.roles.support.includes(id)) &&
+          input.roleIds.some((id) => config.roles.curator.includes(id));
+        return deactivate(tx, staff, input.at, input.reason ?? 'level_changed', supportRoleMissing);
+      }
     } else if (staff.status === 'inactive') {
       const [row] = await tx
         .update(staffMembers)
         .set({ status: 'active', level, lastEventAt: input.at })
         .where(eq(staffMembers.id, staff.id))
         .returning();
-      await recordChange(tx, staff, 'reactivated', input.at, { level, previousLevel: staff.level });
+      await recordChange(tx, staff, 'reactivated', input.at, { level });
       return row!;
     } else if (staff.level !== level) {
       const [row] = await tx
@@ -198,6 +219,9 @@ export async function removeMember(deps: StaffDeps, userId: string, at: Date): P
  * recorded in Redis only after all its members were synced, together with its part number, in
  * one MULTI. When every part is recorded, one worker (guarded by a lock) deactivates active staff
  * missing from the combined set. A failed or missing part therefore never deactivates anyone.
+ * The first part fixes `parts` (`snapshot:<id>:parts`, same TTL); a later part with a different
+ * `parts` is refused and logged. A snapshot that would deactivate more than half of the active
+ * staff and at least 3 people is not applied: an error is logged and nobody is deactivated.
  * The keys are never deleted; they expire after an hour, and `applied` stops a redelivered part
  * from running the deactivation again. If the lock is held the call throws so the entry is retried.
  */
@@ -212,11 +236,27 @@ export async function applySnapshot(
   const atKey = `${base}:at`;
   const lockKey = `${base}:lock`;
   const appliedKey = `${base}:applied`;
+  const partsKey = `${base}:parts`;
   const at = new Date(event.at);
 
   if (await redis.exists(appliedKey)) {
     log.info('snapshot already applied, part ignored', { snapshotId: event.snapshotId, part: event.part });
     return;
+  }
+
+  // The first part to arrive fixes the part count; a part that disagrees is refused unrecorded.
+  const first = await redis.set(partsKey, String(event.parts), 'EX', SNAPSHOT_TTL_SECONDS, 'NX');
+  if (first !== 'OK') {
+    const expected = await redis.get(partsKey);
+    if (expected !== String(event.parts)) {
+      log.error('snapshot part disagrees with the part count of an earlier part, part refused', {
+        snapshotId: event.snapshotId,
+        part: event.part,
+        parts: event.parts,
+        expectedParts: expected,
+      });
+      return;
+    }
   }
 
   for (const m of event.members) {
@@ -263,8 +303,17 @@ export async function applySnapshot(
         .from(staffMembers)
         .innerJoin(users, eq(users.id, staffMembers.userId))
         .where(and(eq(staffMembers.guildId, config.guildId), eq(staffMembers.status, 'active')));
-      for (const u of active) {
-        if (present.has(u.discordId)) continue;
+      const missing = active.filter((u) => !present.has(u.discordId));
+      if (missing.length >= SNAPSHOT_MASS_DEACTIVATION_MIN && missing.length * 2 > active.length) {
+        // A truncated but complete-looking snapshot would otherwise close everyone's access.
+        log.error('snapshot would deactivate more than half of the active staff, deactivation refused', {
+          snapshotId: event.snapshotId,
+          wouldDeactivate: missing.length,
+          active: active.length,
+        });
+        missing.length = 0;
+      }
+      for (const u of missing) {
         // A newer event for this member makes syncMember skip the stale snapshot view.
         await syncMember(
           { db, config },

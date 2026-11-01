@@ -186,6 +186,62 @@ describe('settings', () => {
     }));
 });
 
+describe('settings validation', () => {
+  it('rejects unknown keys, too small waiting times and fractional token amounts with 400', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      const bad: object[] = [
+        { ticketRat: 5 },
+        { ticketRate: 5, extra: true },
+        { inactivityMinutes: 0 },
+        { inactivityReplyMinutes: 0 },
+        { ticketWaitMinutes: 0 },
+        { ticketRate: 1.5 },
+        { shiftHourRate: 0.5 },
+        { normBonus: 10.25 },
+      ];
+      for (const payload of bad) {
+        const res = await call(ctx, 'PATCH', '/settings', admin.token, payload);
+        expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+        expect(res.json().error.code).toBe('VALIDATION_ERROR');
+      }
+      expect(SettingsSchema.parse((await call(ctx, 'GET', '/settings', admin.token)).json())).toEqual(
+        SettingsSchema.parse({}),
+      );
+      expect(await ctx.db.select().from(auditLog).where(eq(auditLog.action, 'settings.updated'))).toHaveLength(0);
+    }));
+
+  it('accepts the smallest valid values', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      const res = await call(ctx, 'PATCH', '/settings', admin.token, {
+        inactivityMinutes: 1,
+        inactivityReplyMinutes: 1,
+        ticketWaitMinutes: 1,
+        ticketRate: 0,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ inactivityMinutes: 1, ticketWaitMinutes: 1, ticketRate: 0 });
+    }));
+
+  it('writes no row and no audit entry for an empty patch or one that changes nothing', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      const defaults = SettingsSchema.parse({});
+      for (const payload of [{}, { ticketRate: defaults.ticketRate }]) {
+        const res = await call(ctx, 'PATCH', '/settings', admin.token, payload);
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual(defaults);
+      }
+      expect(await ctx.db.select().from(auditLog).where(eq(auditLog.action, 'settings.updated'))).toHaveLength(0);
+
+      await call(ctx, 'PATCH', '/settings', admin.token, { ticketRate: 11 });
+      const same = await call(ctx, 'PATCH', '/settings', admin.token, { ticketRate: 11 });
+      expect(same.statusCode).toBe(200);
+      expect(await ctx.db.select().from(auditLog).where(eq(auditLog.action, 'settings.updated'))).toHaveLength(1);
+    }));
+});
+
 describe('pagination', () => {
   it('pages /staff newest first without duplicates, with equal timestamps', () =>
     withApp({ redis }, async (ctx) => {
@@ -295,6 +351,17 @@ describe('GET /internal/members/:discordUserId', () => {
       const missing = await call(ctx, 'GET', `/internal/members/${discordId(2)}`, SERVICE_TOKEN);
       expect(missing.statusCode).toBe(404);
       expect(missing.json().error.code).toBe('NOT_FOUND');
+    }));
+});
+
+describe('GET /internal/members for an inactive member', () => {
+  it('returns level NONE and status inactive', () =>
+    withApp({ redis }, async (ctx) => {
+      await member(ctx, 1, [SUPPORT_ROLE, CURATOR_ROLE]);
+      await syncMember({ db: ctx.db, config }, memberInput(1, [], new Date(Date.now() + 1000)));
+      const res = await call(ctx, 'GET', `/internal/members/${discordId(1)}`, SERVICE_TOKEN);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ level: 'NONE', status: 'inactive', tokenBalance: 0, username: 'user1' });
     }));
 });
 
@@ -431,5 +498,26 @@ describe('settings concurrency, many writers', () => {
       const final = SettingsSchema.parse((await call(ctx, 'GET', '/settings', admin.token)).json());
       expect(final).toMatchObject(Object.assign({}, ...patches));
       expect(await ctx.db.select().from(auditLog).where(eq(auditLog.action, 'settings.updated'))).toHaveLength(6);
+    }));
+});
+
+describe('permissions concurrency', () => {
+  it('answers 200 to four parallel PATCH /permissions of one level', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      const sets = [
+        ['reports.view', 'tickets.view_all'],
+        ['reports.view'],
+        ['tickets.view_all', 'tokens.grant'],
+        ['reports.view', 'tickets.view_all', 'tokens.grant'],
+      ];
+      const res = await Promise.all(
+        sets.map((grants) => call(ctx, 'PATCH', '/permissions', admin.token, { level: 'CURATOR', grants })),
+      );
+      expect(res.map((r) => r.statusCode)).toEqual([200, 200, 200, 200]);
+      const rows = await ctx.db.select().from(rolePermissions).where(eq(rolePermissions.level, 'CURATOR'));
+      const final = rows.map((r) => r.permission).sort();
+      expect(sets.map((s) => [...s].sort())).toContainEqual(final);
+      expect(await ctx.db.select().from(auditLog).where(eq(auditLog.action, 'grants.updated'))).toHaveLength(4);
     }));
 });

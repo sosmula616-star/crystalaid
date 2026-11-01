@@ -1,7 +1,7 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { AppError } from '@crystalaid/contracts';
 import { PERMISSIONS, type Level, type Permission } from '@crystalaid/domain';
-import { rolePermissions, seedDefaults, settings, staffMembers, type Db } from '@crystalaid/database';
+import { rolePermissions, seedDefaults, settings, type Db } from '@crystalaid/database';
 import { writeAudit } from './audit.js';
 
 type GrantLevel = 'SUPPORT' | 'CURATOR';
@@ -16,11 +16,14 @@ export async function getGrants(db: Db, guildId: string, level: Level): Promise<
 }
 
 /**
- * Replaces the grants of SUPPORT or CURATOR. Only ADMIN may do this. The guild is the one the
- * acting admin belongs to. Amount limits of permissions that stay granted are kept.
+ * Replaces the grants of SUPPORT or CURATOR in `guildId` (the configured guild, passed by the
+ * caller). Only ADMIN may do this. Amount limits of permissions that stay granted are kept.
+ * Concurrent updates of one guild and level are serialized by an advisory lock held until the
+ * transaction ends.
  */
 export async function updateGrants(
   db: Db,
+  guildId: string,
   actor: { userId: string; level: Level },
   level: GrantLevel,
   grants: Permission[],
@@ -36,12 +39,7 @@ export async function updateGrants(
   const wanted = [...new Set(grants)];
 
   await db.transaction(async (tx) => {
-    const [membership] = await tx
-      .select({ guildId: staffMembers.guildId })
-      .from(staffMembers)
-      .where(eq(staffMembers.userId, actor.userId));
-    if (!membership) throw new AppError('FORBIDDEN', 'Actor is not a staff member', 403);
-    const guildId = membership.guildId;
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`grants:${guildId}:${level}`}, 0))`);
 
     const before = await tx
       .select()

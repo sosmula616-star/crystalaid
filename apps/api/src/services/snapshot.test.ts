@@ -203,3 +203,64 @@ describe('applySnapshot', () => {
       expect(await statusOf(db, 12)).toBe('inactive');
     }));
 });
+
+describe('snapshot safeguards', () => {
+  it('refuses to deactivate more than half of the active staff when at least 3 would go', () =>
+    withTestDb(async (db) => {
+      const log = recordingLog();
+      const deps = { db, redis, config, log };
+      await seed(db, [10, 11, 12, 13, 14, 15], past());
+      // a truncated list: 2 of 6 present, 4 would be deactivated
+      await applySnapshot(deps, snap('m1', 1, 1, [10, 11]));
+      for (const n of [10, 11, 12, 13, 14, 15]) expect(await statusOf(db, n)).toBe('active');
+      expect(log.errors).toHaveLength(1);
+      expect(log.errors[0]).toMatch(/more than half/);
+      expect(await db.select().from(auditLog).where(eq(auditLog.action, 'staff.deactivated'))).toHaveLength(0);
+      // refused once: a redelivered part does not try again
+      expect(await redis.exists('snapshot:m1:applied')).toBe(1);
+    }));
+
+  it('still deactivates exactly half, and fewer than 3 people even when that is most of the staff', () =>
+    withTestDb(async (db) => {
+      const deps = { db, redis, config, log: recordingLog() };
+      await seed(db, [10, 11, 12, 13, 14, 15], past());
+      await applySnapshot(deps, snap('m2', 1, 1, [10, 11, 12, 13])); // 2 of 6 go
+      expect(await statusOf(db, 14)).toBe('inactive');
+      expect(await statusOf(db, 15)).toBe('inactive');
+
+      const log = recordingLog();
+      await applySnapshot({ db, redis, config, log }, snap('m3', 1, 1, [10, 11])); // 2 of 4 go: exactly half
+      expect(await statusOf(db, 12)).toBe('inactive');
+      expect(await statusOf(db, 13)).toBe('inactive');
+      expect(log.errors).toHaveLength(0);
+    }));
+
+  it('allows exactly half when 3 or more go', () =>
+    withTestDb(async (db) => {
+      const log = recordingLog();
+      await seed(db, [10, 11, 12, 13, 14, 15], past());
+      await applySnapshot({ db, redis, config, log }, snap('m4', 1, 1, [10, 11, 12])); // 3 of 6 go
+      expect(await statusOf(db, 13)).toBe('inactive');
+      expect(log.errors).toHaveLength(0);
+    }));
+
+  it('refuses a part whose parts disagrees with an earlier part, and records nothing for it', () =>
+    withTestDb(async (db) => {
+      const log = recordingLog();
+      const deps = { db, redis, config, log };
+      await seed(db, [10, 11, 12], past());
+      await applySnapshot(deps, snap('p1', 1, 3, [10]));
+      expect(await redis.get('snapshot:p1:parts')).toBe('3');
+      expect(await redis.ttl('snapshot:p1:parts')).toBeGreaterThan(3500);
+
+      // this part claims there are only 2 parts: together with part 1 that would look complete
+      await applySnapshot(deps, snap('p1', 2, 2, [11, 99]));
+      expect(log.errors).toHaveLength(1);
+      expect(log.errors[0]).toMatch(/disagrees/);
+      expect(await redis.smembers('snapshot:p1:done')).toEqual(['1']);
+      expect(await redis.sismember('snapshot:p1:members', discordId(99))).toBe(0);
+      expect(await statusOf(db, 99)).toBeUndefined();
+      expect(await redis.exists('snapshot:p1:applied')).toBe(0);
+      for (const n of [10, 11, 12]) expect(await statusOf(db, n)).toBe('active');
+    }));
+});

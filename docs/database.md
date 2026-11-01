@@ -7,7 +7,7 @@ PostgreSQL. Схема: `packages/database/src/schema.ts` (Drizzle). Мигра�
 | Таблица | Назначение |
 |---|---|
 | `users` | глобальная личность: `discord_id` (уникален), имя, аватар |
-| `staff_members` | запись стаффа в гильдии: `level` (NONE, SUPPORT, CURATOR, ADMIN), `status` (active, inactive), должность, `token_balance` (не меньше 0), `last_event_at`; пара гильдия и пользователь уникальна |
+| `staff_members` | запись стаффа в гильдии: `level` (NONE, SUPPORT, CURATOR, ADMIN; у неактивной записи `NONE`, прежний уровень хранится в `career_events`), `status` (active, inactive), должность, `token_balance` (не меньше 0), `last_event_at`; пара гильдия и пользователь уникальна |
 | `role_permissions` | права уровней SUPPORT и CURATOR по гильдии; ADMIN имеет всё без записей |
 | `settings` | настройки гильдии одной JSON-строкой |
 | `audit_log` | журнал действий, только добавление |

@@ -67,20 +67,44 @@ export type PermissionsUpdate = z.infer<typeof PermissionsUpdate>;
 
 const nonNegative = z.number().min(0);
 const nonNegativeInt = z.number().int().min(0);
+/** Waiting times: zero would fire a timer at once. */
+const minutes = z.number().int().min(1);
+
+/** Token amounts are whole numbers: the ledger is integer. */
+const settingFields = {
+  ticketRate: nonNegativeInt,
+  shiftHourRate: nonNegativeInt,
+  normBonus: nonNegativeInt,
+  weeklyNormHours: nonNegative,
+  weeklyNormTickets: nonNegativeInt,
+  ticketWaitMinutes: minutes,
+  inactivityMinutes: minutes,
+  inactivityReplyMinutes: minutes,
+  warningDays: nonNegativeInt,
+  ticketCategories: z.array(z.string()),
+};
 
 export const SettingsSchema = z.object({
-  ticketRate: nonNegative.default(10),
-  shiftHourRate: nonNegative.default(5),
-  normBonus: nonNegative.default(50),
-  weeklyNormHours: nonNegative.default(20),
-  weeklyNormTickets: nonNegativeInt.default(30),
-  ticketWaitMinutes: nonNegativeInt.default(30),
-  inactivityMinutes: nonNegativeInt.default(30),
-  inactivityReplyMinutes: nonNegativeInt.default(10),
-  warningDays: nonNegativeInt.default(30),
-  ticketCategories: z.array(z.string()).default([]),
+  ticketRate: settingFields.ticketRate.default(10),
+  shiftHourRate: settingFields.shiftHourRate.default(5),
+  normBonus: settingFields.normBonus.default(50),
+  weeklyNormHours: settingFields.weeklyNormHours.default(20),
+  weeklyNormTickets: settingFields.weeklyNormTickets.default(30),
+  ticketWaitMinutes: settingFields.ticketWaitMinutes.default(30),
+  inactivityMinutes: settingFields.inactivityMinutes.default(30),
+  inactivityReplyMinutes: settingFields.inactivityReplyMinutes.default(10),
+  warningDays: settingFields.warningDays.default(30),
+  ticketCategories: settingFields.ticketCategories.default([]),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
+
+/** PATCH /settings body: any subset of the settings, no unknown keys. */
+export const SettingsPatch = z.strictObject(
+  Object.fromEntries(Object.entries(settingFields).map(([k, v]) => [k, v.optional()])) as {
+    [K in keyof typeof settingFields]: z.ZodOptional<(typeof settingFields)[K]>;
+  },
+);
+export type SettingsPatch = z.infer<typeof SettingsPatch>;
 
 export const AuditListResponse = z.object({
   items: z.array(

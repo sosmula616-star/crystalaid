@@ -30,6 +30,8 @@ export interface DiscordClient {
 }
 
 const TIMEOUT_MS = 5000;
+/** Discord asks bots to identify themselves: DiscordBot (url, version). */
+export const USER_AGENT = 'DiscordBot (https://github.com/sosmula616-star/crystalaid, 1.0.0)';
 
 /**
  * Discord REST client. Rate limits (429), server errors and network failures or timeouts all
@@ -51,7 +53,11 @@ export function createDiscordClient(
   async function call(endpoint: string, path: string, init: RequestInit): Promise<Response> {
     let res: Response;
     try {
-      res = await fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      res = await fetch(`${base}${path}`, {
+        ...init,
+        headers: { 'user-agent': USER_AGENT, ...(init.headers as Record<string, string> | undefined) },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
     } catch (err) {
       const timedOut = err instanceof Error && err.name === 'TimeoutError';
       throw unavailable(endpoint, { reason: timedOut ? 'timeout' : 'network' });

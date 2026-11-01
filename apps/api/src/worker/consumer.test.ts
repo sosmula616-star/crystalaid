@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { auditLog, staffMembers, withTestDb } from '@crystalaid/database';
-import { consumeBatch } from './consumer.js';
+import { auditLog, createDb, staffMembers, withTestDb } from '@crystalaid/database';
+import { MAX_DELIVERIES, consumeBatch } from './consumer.js';
 import {
   GUILD,
   SUPPORT_ROLE,
@@ -180,5 +180,30 @@ describe('reclaim', () => {
       expect(n).toBe(10);
       expect(await db.select().from(staffMembers)).toHaveLength(10);
       expect(await pendingCount()).toBe(50);
+    }));
+});
+
+describe('database outage', () => {
+  it('spends no delivery count while the database is unreachable, then applies the event', () =>
+    withTestDb(async (db) => {
+      const log = recordingLog();
+      await consumeBatch({ db, redis, config, log, blockMs: 0 }, 'probe'); // creates the group
+      await publish(updated(20));
+      const down = createDb('postgres://nobody:nothing@127.0.0.1:1/none');
+      try {
+        // far more attempts than MAX_DELIVERIES, with every entry always eligible for reclaim
+        for (let i = 0; i < MAX_DELIVERIES + 4; i += 1) {
+          await expect(consumeBatch({ db: down, redis, config, log, minIdleMs: 0 }, 'c1')).rejects.toThrow();
+        }
+      } finally {
+        await down.$client.end();
+      }
+      expect(await redis.xlen('events:dead')).toBe(0);
+      expect(await redis.xlen('events:bot')).toBe(1);
+      expect(await pendingCount()).toBe(0);
+
+      expect(await consumeBatch({ db, redis, config, log, minIdleMs: 0 }, 'c1')).toBe(1);
+      expect(await db.select().from(staffMembers)).toHaveLength(1);
+      expect(await redis.xlen('events:dead')).toBe(0);
     }));
 });

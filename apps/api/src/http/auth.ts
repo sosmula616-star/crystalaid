@@ -1,9 +1,9 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Env, ServerConfig } from '@crystalaid/config';
 import { ActivityAuthRequest, AppError, type ActivityAuthResponse } from '@crystalaid/contracts';
-import { staffMembers, users, type Db } from '@crystalaid/database';
+import { careerEvents, staffMembers, users, type Db } from '@crystalaid/database';
 import { hasPermission, type Level, type Permission } from '@crystalaid/domain';
 import type { DiscordClient } from '../discord/client.js';
 import { getGrants } from '../services/permissions.js';
@@ -44,6 +44,11 @@ const LEVEL_RANK: Record<Level, number> = { NONE: 0, SUPPORT: 1, CURATOR: 2, ADM
 const bearer = (request: FastifyRequest): string | undefined =>
   /^Bearer (.+)$/i.exec(request.headers.authorization ?? '')?.[1];
 
+const NOT_STAFF_MESSAGE = 'No access to the staff panel';
+/** A curator needs the support role too; saying so lets them ask for the missing role. */
+const SUPPORT_MISSING_MESSAGE =
+  'No access to the staff panel: the support role is missing (a curator also needs the support role)';
+
 const digest = (value: string) => createHash('sha256').update(value).digest();
 
 export interface AuthDeps {
@@ -73,7 +78,18 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
       throw new AppError('UNAUTHORIZED', 'Invalid session', 401);
     }
     if (!row || row.staff.status !== 'active' || row.staff.level === 'NONE') {
-      throw new AppError('NOT_STAFF', 'No access to the staff panel', 403);
+      // Only on this failure path: was the last deactivation caused by a missing support role?
+      const [last] = row
+        ? await db
+            .select({ type: careerEvents.type, data: careerEvents.data })
+            .from(careerEvents)
+            .where(and(eq(careerEvents.guildId, config.guildId), eq(careerEvents.userId, claims.userId)))
+            .orderBy(desc(careerEvents.createdAt), desc(careerEvents.id))
+            .limit(1)
+        : [];
+      const supportMissing =
+        last?.type === 'deactivated' && (last.data as { supportRoleMissing?: boolean } | null)?.supportRoleMissing === true;
+      throw new AppError('NOT_STAFF', supportMissing ? SUPPORT_MISSING_MESSAGE : NOT_STAFF_MESSAGE, 403);
     }
     request.actor = {
       userId: claims.userId,
@@ -136,7 +152,11 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
         { userId: me.id, username: me.username, avatar: me.avatar, roleIds: member.roles, at },
       );
       if (!staff || staff.status !== 'active') {
-        throw new AppError('NOT_STAFF', 'No access to the staff panel', 403);
+        const supportMissing =
+          !member.roles.some((id) => config.roles.support.includes(id)) &&
+          member.roles.some((id) => config.roles.curator.includes(id)) &&
+          !member.roles.some((id) => config.roles.admin.includes(id));
+        throw new AppError('NOT_STAFF', supportMissing ? SUPPORT_MISSING_MESSAGE : NOT_STAFF_MESSAGE, 403);
       }
 
       const sessionToken = await signSession({ userId: staff.userId, discordUserId: me.id }, env.JWT_SECRET);

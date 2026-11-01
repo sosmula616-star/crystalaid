@@ -16,7 +16,7 @@ export function registerPermissions(app: FastifyInstance, deps: { db: Db; config
   app.patch('/permissions', { onRequest: guards }, async (request) => {
     const { level, grants } = PermissionsUpdate.parse(request.body);
     const { userId, level: actorLevel } = request.actor;
-    await updateGrants(db, { userId, level: actorLevel }, level, grants);
+    await updateGrants(db, config.guildId, { userId, level: actorLevel }, level, grants);
     return read();
   });
 }

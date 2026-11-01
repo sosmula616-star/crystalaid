@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import type { ServerConfig } from '@crystalaid/config';
 import { BotEvent } from '@crystalaid/contracts';
@@ -118,6 +119,8 @@ async function reclaim(deps: ConsumerDeps, consumer: string, minIdleMs: number):
  */
 export async function consumeBatch(deps: ConsumerDeps, consumer: string): Promise<number> {
   const { db, redis, config, log } = deps;
+  // An outage must not spend delivery counts: fail before any reclaim or delivery.
+  await db.execute(sql`select 1`);
   await ensureGroup(redis);
 
   const entries = await reclaim(deps, consumer, deps.minIdleMs ?? DEFAULT_MIN_IDLE_MS);
