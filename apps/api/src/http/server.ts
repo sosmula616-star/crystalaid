@@ -10,6 +10,12 @@ import { registerAuth } from './auth.js';
 import { registerErrorHandling } from './errors.js';
 import { registerHealth } from './health.js';
 import { registerRateLimit } from './rateLimit.js';
+import { registerAudit } from './routes/audit.js';
+import { registerInternal } from './routes/internal.js';
+import { registerMe } from './routes/me.js';
+import { registerPermissions } from './routes/permissions.js';
+import { registerSettings } from './routes/settings.js';
+import { registerStaff } from './routes/staff.js';
 
 export interface ServerDeps {
   env: Env;
@@ -63,6 +69,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerRateLimit(app, redis);
   registerHealth(app, { db, redis });
   registerAuth(app, deps);
+  const routeDeps = { db, config: deps.config };
+  registerMe(app, routeDeps);
+  registerStaff(app, routeDeps);
+  registerPermissions(app, routeDeps);
+  registerSettings(app, routeDeps);
+  registerAudit(app, routeDeps);
+  registerInternal(app, routeDeps);
   return app;
 }
 

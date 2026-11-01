@@ -17,7 +17,7 @@ describe('loadEnv', () => {
   });
 
   it('rejects a malformed TRUSTED_PROXIES entry', () => {
-    for (const bad of ['nonsense', '10.0.0.0/33', '10.0.0.1, bogus', '::1/129', '10.0.0.1/']) {
+    for (const bad of ['nonsense', '10.0.0.0/33', '10.0.0.1, bogus', '::1/129', '10.0.0.1/', '0.0.0.0/0', '::/0', '10.0.0.0/00']) {
       expect(() => loadEnv({ ...valid, TRUSTED_PROXIES: bad })).toThrow(/TRUSTED_PROXIES/);
     }
   });

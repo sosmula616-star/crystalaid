@@ -6,7 +6,8 @@ function isIpOrCidr(entry: string): boolean {
   const version = isIP(address ?? '');
   if (version === 0 || rest.length > 0) return false;
   if (prefix === undefined) return true;
-  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (version === 4 ? 32 : 128);
+  // Prefix 0 would trust every address, so it is rejected.
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) >= 1 && Number(prefix) <= (version === 4 ? 32 : 128);
 }
 
 /** Comma-separated IPs or CIDRs; empty means no proxy is trusted. */
