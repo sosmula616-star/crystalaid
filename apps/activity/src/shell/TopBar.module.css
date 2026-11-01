@@ -33,7 +33,8 @@
 /* The name shrinks first: at most 40% of the bar, the title and the badge keep their room. */
 .user {
   display: flex;
-  flex: 0 1 40%;
+  flex: 0 1 auto;
+  max-width: 40%;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;

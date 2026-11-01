@@ -52,7 +52,7 @@ function describeFailure(error: unknown): Failure {
     case 'NOT_STAFF':
       return {
         title: 'auth.notStaff.title',
-        description: (error instanceof ApiError && error.reason && NOT_STAFF_REASONS[error.reason]) || 'auth.notStaff.description',
+        description: (error instanceof ApiError && error.reason && Object.hasOwn(NOT_STAFF_REASONS, error.reason) && NOT_STAFF_REASONS[error.reason]) || 'auth.notStaff.description',
         retry: false,
       };
     case 'GUILD_REQUIRED':

@@ -1,11 +1,11 @@
 # Архитектура
 
-Реализовано ядро: HTTP API и worker, который применяет события Discord. Бота и Activity пока нет; их роль описана ниже как контракт.
+Реализовано ядро: HTTP API и worker, который применяет события Discord. Activity есть (`apps/activity`), бота пока нет; роль бота описана ниже как контракт.
 
 ## Процессы
 
 ```
-Бот (не реализован)                Activity (не реализована)
+Бот (не реализован)                Activity (реализована)
    |  XADD events:bot                  |  POST /auth/activity, Bearer JWT
    v                                   v
  Redis 5+ ------------------------> API (Fastify) -----> PostgreSQL

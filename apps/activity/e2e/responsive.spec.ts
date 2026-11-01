@@ -239,6 +239,15 @@ for (const width of [320, 360, 390]) {
   });
 }
 
+test('at 1440 with a short name the level badge sits at the right edge of the bar', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openApp(page, 'level=SUPPORT');
+  const bar = (await page.locator('header').boundingBox())!;
+  const badge = (await page.locator('header').getByText('Саппорт', { exact: true }).boundingBox())!;
+  expect(bar.x + bar.width - (badge.x + badge.width)).toBeLessThanOrEqual(24);
+  expect((await page.getByRole('heading', { level: 1 }).boundingBox())!.width).toBeGreaterThanOrEqual(120);
+});
+
 test('the name is hidden under 480 px and shown above, the level badge stays', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await openApp(page, 'level=ADMIN&name=long');

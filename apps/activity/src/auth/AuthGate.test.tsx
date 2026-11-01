@@ -100,6 +100,15 @@ describe('AuthGate', () => {
     expect(screen.queryByText('Server words')).toBeNull();
   });
 
+  it('does not treat an inherited key as a reason', async () => {
+    setup({
+      me: async () => {
+        throw new ApiError('NOT_STAFF', 'Server words', 403, undefined, 'constructor');
+      },
+    });
+    expect(await screen.findByText('У вас нет доступа к панели сотрудников.')).toBeTruthy();
+  });
+
   it('shows the NOT_STAFF screen when the login itself is refused', async () => {
     setup({
       start: async () => {
