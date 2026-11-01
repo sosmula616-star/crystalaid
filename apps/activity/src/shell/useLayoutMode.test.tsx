@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { FakeResizeObserver, installFakeResizeObserver, removeFakeResizeObserver, resizeTo } from './fakeResizeObserver.js';
+import { FakeResizeObserver, installFakeResizeObserver, removeFakeResizeObserver, resizeBorderBox, resizeTo } from '../testing/fakeResizeObserver.js';
 import { layoutModeFor, useLayoutMode } from './useLayoutMode.js';
 
 function Probe({ discordMode }: { discordMode: number | null }) {
@@ -59,5 +59,18 @@ describe('useLayoutMode', () => {
     expect(FakeResizeObserver.instances).toHaveLength(1);
     unmount();
     expect(FakeResizeObserver.instances).toHaveLength(0);
+  });
+});
+
+describe('useLayoutMode box size', () => {
+  beforeEach(installFakeResizeObserver);
+  afterEach(removeFakeResizeObserver);
+
+  it('prefers the border box and falls back to the content rect', () => {
+    render(<Probe discordMode={null} />);
+    resizeBorderBox(700, 740); // content box says narrow, border box says medium
+    expect(screen.getByTestId('probe').textContent).toBe('medium');
+    resizeTo(700);
+    expect(screen.getByTestId('probe').textContent).toBe('narrow');
   });
 });

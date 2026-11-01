@@ -2,7 +2,12 @@ import { useLayoutEffect, useState, type RefObject } from 'react';
 
 export type LayoutMode = 'compact' | 'narrow' | 'medium' | 'wide' | 'ultrawide';
 
-/** `layout_mode` values of Discord's ACTIVITY_LAYOUT_MODE_UPDATE: UNHANDLED -1, FOCUSED 0, PIP 1, GRID 2. */
+/**
+ * `layout_mode` values of Discord's ACTIVITY_LAYOUT_MODE_UPDATE: UNHANDLED -1, FOCUSED 0, PIP 1, GRID 2.
+ * SDK 2.5.0 has no getter for the current layout mode, only the update event. An
+ * Activity that starts in PIP therefore becomes compact on the first event, or
+ * through the narrow width of its window, whichever comes first.
+ */
 const DISCORD_PIP = 1;
 
 /** Spec 4.4. Discord's picture-in-picture window wins; every other mode follows the width. */
@@ -33,7 +38,9 @@ export function useLayoutMode(
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[entries.length - 1];
-      if (entry) setWidth(entry.contentRect.width);
+      if (!entry) return;
+      // The border box is what the layout uses; older engines only report the content box.
+      setWidth(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width);
     });
     observer.observe(element);
     return () => observer.disconnect();

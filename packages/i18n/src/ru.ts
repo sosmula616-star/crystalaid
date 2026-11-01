@@ -44,7 +44,6 @@ export const ru = {
   'shell.moreTitle': 'Все разделы',
   'shell.closeMore': 'Закрыть',
   'shell.skipToContent': 'Перейти к содержимому',
-  'shell.openOverview': 'Открыть обзор',
   'shell.loadingSection': 'Раздел загружается',
   'shell.sectionError.title': 'Не удалось показать раздел',
   'shell.sectionError.description': 'Остальные разделы работают. Повторите попытку.',

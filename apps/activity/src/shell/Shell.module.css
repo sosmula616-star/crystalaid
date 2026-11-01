@@ -1,7 +1,4 @@
 .shell {
-  /* Spec 4.4: content stops growing at 1440 px on very wide containers. */
-  --content-max: 1440px;
-
   container: shell / inline-size;
   display: flex;
   flex-direction: column;

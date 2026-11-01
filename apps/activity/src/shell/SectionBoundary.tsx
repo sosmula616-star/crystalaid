@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ReactNode } from 'react';
 import { ErrorState } from '@crystalaid/design-system';
 import { ApiError } from '../api/client.js';
 import type { Translate } from './context.js';
@@ -32,7 +32,7 @@ export class SectionBoundary extends Component<SectionBoundaryProps, State> {
     return { error: { value: error } };
   }
 
-  override componentDidCatch(error: unknown, _info: ErrorInfo): void {
+  override componentDidCatch(error: unknown): void {
     this.props.onError?.(error);
   }
 

@@ -1,8 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type LazyExoticComponent } from 'react';
 import { Button, Skeleton } from '@crystalaid/design-system';
 import type { MeResponse } from '@crystalaid/contracts';
 import { BottomNav } from './BottomNav.js';
-import { ShellContext, type Translate } from './context.js';
+import { ShellContext, type CompactAction, type Translate } from './context.js';
 import { isAuthError, SectionBoundary } from './SectionBoundary.js';
 import { SECTIONS, visibleSections, type Section, type SectionId } from './sections.js';
 import { SideNav } from './SideNav.js';
@@ -42,17 +42,38 @@ interface SectionViewProps {
   reportAuthFailure: (error: unknown) => void;
 }
 
+/**
+ * One lazy component per loader, so returning to a loaded section shows no skeleton.
+ * An entry is dropped when its load or render fails, so a retry loads again.
+ */
+const lazyCache = new WeakMap<Section['load'], LazyExoticComponent<ComponentType>>();
+
+function lazyFor(section: Section): LazyExoticComponent<ComponentType> {
+  let component = lazyCache.get(section.load);
+  if (!component) {
+    component = lazy(() =>
+      section.load().catch((error: unknown) => {
+        lazyCache.delete(section.load);
+        throw error;
+      }),
+    );
+    lazyCache.set(section.load, component);
+  }
+  return component;
+}
+
 /** One section: lazy, with its own error boundary. A retry loads the section again. */
 function SectionView({ section, t, onRetryAuth, reportAuthFailure }: SectionViewProps) {
   const [attempt, setAttempt] = useState(0);
-  // React.lazy remembers a failed load, so every attempt gets a fresh component.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const Component = useMemo(() => lazy(section.load), [section, attempt]);
+  // `attempt` forces a fresh lookup after a retry: a failed entry was dropped from the cache.
+  const Component = useMemo(() => lazyFor(section), [section, attempt]);
   return (
     <SectionBoundary
       key={attempt}
       t={t}
       onError={(error) => {
+        // A failed section is loaded again on retry, whatever the failure was.
+        lazyCache.delete(section.load);
         if (isAuthError(error)) reportAuthFailure(error);
       }}
       onRetry={(error) => (isAuthError(error) ? onRetryAuth() : setAttempt((n) => n + 1))}
@@ -92,7 +113,9 @@ export function Shell({ me, t, onRetryAuth, reportAuthFailure, onLayoutMode, sec
     headingRef.current?.focus();
   }, [active?.id]);
 
-  const context = useMemo(() => ({ me, t }), [me, t]);
+  const [compactAction, setCompactAction] = useState<CompactAction | null>(null);
+  const context = useMemo(() => ({ me, t, setCompactAction }), [me, t]);
+  const focusHeading = useCallback(() => headingRef.current?.focus(), []);
   const compact = mode === 'compact';
   const nav = { sections: available, activeId: active?.id ?? FIRST_SECTION, onSelect: setActiveId, t };
   const title = active ? t(active.labelKey) : '';
@@ -108,16 +131,18 @@ export function Shell({ me, t, onRetryAuth, reportAuthFailure, onLayoutMode, sec
           {mode === 'medium' || mode === 'wide' || mode === 'ultrawide' ? (
             <SideNav {...nav} iconOnly={mode === 'medium'} />
           ) : null}
-          <main id="main-content" className={styles.main}>
+          <main id="main-content" tabIndex={-1} className={styles.main}>
             {compact ? (
               <div className={styles.compact}>
                 <h1 ref={headingRef} tabIndex={-1} className={styles.compactTitle}>
                   {title}
                 </h1>
-                <Button onClick={() => setActiveId(FIRST_SECTION)}>{t('shell.openOverview')}</Button>
+                {compactAction ? <Button onClick={compactAction.onSelect}>{compactAction.label}</Button> : null}
               </div>
-            ) : active ? (
-              <div className={styles.content}>
+            ) : null}
+            {/* Hidden, not unmounted, in compact mode: the section keeps its state. */}
+            {active ? (
+              <div className={styles.content} hidden={compact}>
                 <SectionView
                   key={active.id}
                   section={active}
@@ -129,7 +154,7 @@ export function Shell({ me, t, onRetryAuth, reportAuthFailure, onLayoutMode, sec
             ) : null}
           </main>
         </div>
-        {mode === 'narrow' ? <BottomNav {...nav} /> : null}
+        {mode === 'narrow' ? <BottomNav {...nav} focusHeading={focusHeading} /> : null}
       </div>
     </ShellContext.Provider>
   );

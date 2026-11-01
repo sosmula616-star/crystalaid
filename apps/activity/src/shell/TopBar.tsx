@@ -1,5 +1,5 @@
 import type { Ref } from 'react';
-import { Badge, Tooltip } from '@crystalaid/design-system';
+import { Badge } from '@crystalaid/design-system';
 import type { MeResponse } from '@crystalaid/contracts';
 import logoUrl from '../assets/logo.png';
 import type { Translate } from './context.js';
@@ -22,12 +22,10 @@ export function TopBar({ title, me, t, headingRef }: TopBarProps) {
         {title}
       </h1>
       <div className={styles.user}>
-        {/* The tooltip only repeats a truncated name; the name itself is always in the DOM. */}
-        <Tooltip content={name}>
-          <span className={styles.name} tabIndex={0}>
-            {name}
-          </span>
-        </Tooltip>
+        {/* No tab stop: the full name is always in the DOM and in `title` for pointer users. */}
+        <span className={styles.name} title={name}>
+          {name}
+        </span>
         <Badge tone="primary">{t(`level.${me.level}`)}</Badge>
       </div>
     </header>

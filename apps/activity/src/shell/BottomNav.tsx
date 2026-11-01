@@ -10,7 +10,7 @@ const BAR_SLOTS = 4;
 /** Lifts the toasts above the bar while it is shown. */
 const TOAST_OFFSET = '--toast-bottom-offset';
 
-export function BottomNav({ sections, activeId, onSelect, t }: NavListProps) {
+export function BottomNav({ sections, activeId, onSelect, t, focusHeading }: NavListProps & { focusHeading: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const barRef = useRef<HTMLElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
@@ -74,6 +74,7 @@ export function BottomNav({ sections, activeId, onSelect, t }: NavListProps) {
         onSelect={onSelect}
         t={t}
         returnFocusRef={moreRef}
+        focusHeading={focusHeading}
       />
     </>
   );

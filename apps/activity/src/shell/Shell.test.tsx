@@ -1,11 +1,12 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import type { ComponentType } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MeResponse } from '@crystalaid/contracts';
 import { createTranslator } from '@crystalaid/i18n';
 import { ApiError } from '../api/client.js';
-import { installFakeResizeObserver, removeFakeResizeObserver, resizeTo } from './fakeResizeObserver.js';
+import { installFakeResizeObserver, removeFakeResizeObserver, resizeTo } from '../testing/fakeResizeObserver.js';
+import { useShell } from './context.js';
 import { Shell, type ShellProps } from './Shell.js';
 import { SECTIONS, type Section } from './sections.js';
 
@@ -110,12 +111,88 @@ describe('Shell', () => {
     expect(within(navigation()).getAllByRole('button')).toHaveLength(6);
   });
 
-  it('shows only the title and one action in compact mode, which opens the overview', async () => {
-    const { user } = setup({}, 200);
+  it('shows only the title in compact mode and no button while the section sets no action', () => {
+    setup({}, 200);
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.getAllByRole('button')).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: 'Открыть обзор' }));
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Обзор');
+  });
+
+  describe('compact mode keeps the section', () => {
+    const Counter: ComponentType = () => {
+      const { setCompactAction } = useShell();
+      const [count, setCount] = useState(0);
+      useEffect(() => {
+        setCompactAction({ label: 'Главное', onSelect: () => setCount((n) => n + 10) });
+        return () => setCompactAction(null);
+      }, [setCompactAction]);
+      return (
+        <button type="button" onClick={() => setCount((n) => n + 1)}>
+          count {count}
+        </button>
+      );
+    };
+    const withCounter = (): Section[] =>
+      SECTIONS.map((s) => ({ ...s, load: async () => ({ default: s.id === 'shift' ? Counter : Fine }) }));
+    const Fine: ComponentType = () => <p>fine</p>;
+
+    it('keeps local state and the active section from wide to compact and back, and shows the section action', async () => {
+      const { user } = setup({ sections: withCounter() }, 1400);
+      await user.click(within(navigation()).getByRole('button', { name: 'Смена' }));
+      await user.click(await screen.findByRole('button', { name: 'count 0' }));
+      expect(screen.getByRole('button', { name: 'count 1' })).toBeTruthy();
+
+      resizeTo(200);
+      expect(screen.queryByRole('navigation')).toBeNull();
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Смена');
+      expect(screen.queryByRole('button', { name: /count/ })).toBeNull(); // hidden, not unmounted
+      await user.click(screen.getByRole('button', { name: 'Главное' }));
+
+      resizeTo(1400);
+      expect(within(navigation()).getByRole('button', { name: 'Смена' }).getAttribute('aria-current')).toBe('page');
+      expect(screen.getByRole('button', { name: 'count 11' })).toBeTruthy();
+    });
+  });
+
+  it('focuses the new section heading after a choice in the drawer, and returns to More on Escape', async () => {
+    const { user } = setup();
+    const more = () => within(navigation()).getByRole('button', { name: 'Ещё' });
+    await user.click(more());
+    await user.click(await screen.findByRole('button', { name: 'Журнал' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Журнал' }));
+
+    await user.click(more());
+    await screen.findByRole('dialog');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(more());
+
+    // Choosing the section that is already open also lands on its heading.
+    await user.click(more());
+    await user.click(await screen.findByRole('button', { name: 'Журнал' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 }));
+  });
+
+  it('loads a section once and shows no skeleton when returning to it', async () => {
+    const load = vi.fn(async () => ({ default: () => <p>fine</p> }));
+    const list = SECTIONS.map((s) => (s.id === 'shift' ? { ...s, load } : s));
+    const { user } = setup({ sections: list });
+    await user.click(within(navigation()).getByRole('button', { name: 'Смена' }));
+    expect(await screen.findByText('fine')).toBeTruthy();
+    await user.click(within(navigation()).getByRole('button', { name: 'Тикеты' }));
+    await user.click(within(navigation()).getByRole('button', { name: 'Смена' }));
+    expect(screen.getByText('fine')).toBeTruthy(); // synchronously, no skeleton
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('makes main focusable for the skip link and gives the user name no tab stop', () => {
+    setup();
+    expect(screen.getByRole('main').getAttribute('tabindex')).toBe('-1');
+    const name = screen.getByText('alice');
+    expect(name.getAttribute('tabindex')).toBeNull();
+    expect(name.getAttribute('title')).toBe('alice');
   });
 
   it('goes compact while Discord reports the PIP mode', () => {

@@ -1,6 +1,11 @@
 import { act } from '@testing-library/react';
 
-type Callback = (entries: { contentRect: { width: number } }[]) => void;
+interface FakeEntry {
+  contentRect: { width: number };
+  borderBoxSize?: { inlineSize: number }[];
+}
+
+type Callback = (entries: FakeEntry[]) => void;
 
 /** Test double: jsdom has no layout, so tests push widths by hand. */
 export class FakeResizeObserver {
@@ -13,8 +18,8 @@ export class FakeResizeObserver {
   disconnect() {
     FakeResizeObserver.instances = FakeResizeObserver.instances.filter((i) => i !== this);
   }
-  emit(width: number) {
-    this.callback([{ contentRect: { width } }]);
+  emit(entry: FakeEntry) {
+    this.callback([entry]);
   }
 }
 
@@ -28,6 +33,16 @@ export function removeFakeResizeObserver() {
   FakeResizeObserver.instances = [];
 }
 
+/** Reports `width` as the content box only, like an engine without `borderBoxSize`. */
 export function resizeTo(width: number) {
-  act(() => FakeResizeObserver.instances.forEach((i) => i.emit(width)));
+  act(() => FakeResizeObserver.instances.forEach((i) => i.emit({ contentRect: { width } })));
+}
+
+/** Reports a border box that differs from the content box (padding or border). */
+export function resizeBorderBox(contentWidth: number, borderBoxWidth: number) {
+  act(() =>
+    FakeResizeObserver.instances.forEach((i) =>
+      i.emit({ contentRect: { width: contentWidth }, borderBoxSize: [{ inlineSize: borderBoxWidth }] }),
+    ),
+  );
 }

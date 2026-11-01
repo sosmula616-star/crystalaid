@@ -47,7 +47,6 @@ export const en: Record<MessageKey, string> = {
   'shell.moreTitle': 'All sections',
   'shell.closeMore': 'Close',
   'shell.skipToContent': 'Skip to content',
-  'shell.openOverview': 'Open overview',
   'shell.loadingSection': 'Loading section',
   'shell.sectionError.title': 'Could not show this section',
   'shell.sectionError.description': 'The other sections still work. Try again.',

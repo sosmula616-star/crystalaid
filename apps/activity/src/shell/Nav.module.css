@@ -96,7 +96,7 @@
   color: var(--color-muted);
   font: var(--text-caption);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--letter-wide);
 }
 
 .list {

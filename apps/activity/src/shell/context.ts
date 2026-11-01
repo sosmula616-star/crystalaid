@@ -4,9 +4,19 @@ import type { createTranslator } from '@crystalaid/i18n';
 
 export type Translate = ReturnType<typeof createTranslator>;
 
+export interface CompactAction {
+  label: string;
+  onSelect: () => void;
+}
+
 export interface ShellContextValue {
   me: MeResponse;
   t: Translate;
+  /**
+   * The one button the compact (picture-in-picture) view shows next to the title.
+   * A section sets it while mounted and clears it with `null`. Default: none.
+   */
+  setCompactAction: (action: CompactAction | null) => void;
 }
 
 /** What every section needs: the signed-in user and the translator. */

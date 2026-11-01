@@ -21,6 +21,8 @@
   --radius-full: 9999px;
 
   --measure: 40ch;
+  --content-max: 1440px;
+  --letter-wide: 0.04em;
 
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Consolas, monospace;
