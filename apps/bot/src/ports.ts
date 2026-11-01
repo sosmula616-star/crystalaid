@@ -59,3 +59,34 @@ export interface ButtonCtx {
   /** Ephemeral note, the message stays as it is. */
   notify(text: string): Promise<void>;
 }
+
+// ---------- /menu and /dev, independent of discord.js (the adapter renders them) ----------
+
+export interface MenuButton {
+  id: string;
+  label: string;
+  style?: 'primary' | 'secondary' | 'success' | 'danger';
+  disabled?: boolean;
+}
+export interface MenuOption {
+  label: string;
+  value: string;
+  default?: boolean;
+}
+/** One action row of a menu message. */
+export type MenuRow =
+  | { kind: 'buttons'; buttons: MenuButton[] }
+  | { kind: 'user'; id: string; placeholder: string }
+  | { kind: 'select'; id: string; placeholder: string; min: number; max: number; options: MenuOption[] };
+
+/** Plain message content (Discord allows 2000 characters) and at most 5 rows. */
+export interface MenuView {
+  text: string;
+  rows: MenuRow[];
+}
+export interface ModalSpec {
+  id: string;
+  title: string;
+  inputs: { id: string; label: string; value?: string; required: boolean; maxLength: number }[];
+}
+export type MenuResult = { view: MenuView } | { modal: ModalSpec } | { note: string };

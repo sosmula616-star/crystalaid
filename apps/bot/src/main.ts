@@ -6,6 +6,7 @@ import { registerCommands } from './commands.js';
 import { createClient, createDiscordPort, guildSource, wire } from './discord.js';
 import { loadBotEnv, loadRootEnvFile } from './env.js';
 import { createHandlers } from './handlers.js';
+import { createMenu } from './menu.js';
 import { createRoster } from './roster.js';
 import { createScheduler } from './scheduler.js';
 import { redisEventSink, redisOfferStore } from './store.js';
@@ -41,7 +42,8 @@ async function start(): Promise<void> {
     onError,
   });
   const scheduler = createScheduler({ api, handlers, config, onError });
-  wire(client, handlers, roster, onError);
+  const menu = createMenu({ api, config, onError, botUptimeSeconds: () => Math.floor(process.uptime()) });
+  wire(client, handlers, roster, onError, menu);
 
   client.once(Events.ClientReady, () => {
     console.log(`[bot] logged in as ${client.user?.tag}`);

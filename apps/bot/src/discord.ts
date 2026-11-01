@@ -13,6 +13,8 @@ import {
   MessageFlags,
   ModalBuilder,
   Options,
+  StringSelectMenuBuilder,
+  UserSelectMenuBuilder,
   Partials,
   TextDisplayBuilder,
   TextInputBuilder,
@@ -23,7 +25,8 @@ import {
   type PartialGuildMember,
 } from 'discord.js';
 import type { ServerConfig } from '@crystalaid/config';
-import type { DiscordPort, LogMessage, MsgRef, OutMessage } from './ports.js';
+import type { DiscordPort, LogMessage, MenuResult, MenuView, ModalSpec, MsgRef, OutMessage } from './ports.js';
+import { isMenuId, opensModal, type Menu } from './menu.js';
 import type { Handlers } from './handlers.js';
 import type { Roster, RosterMember } from './roster.js';
 import { MODAL_ID, MODAL_INPUT_ID, MODAL_TITLE, parseButton } from './text.js';
@@ -145,6 +148,7 @@ export function wire(
   h: Handlers,
   roster: Roster,
   onError: (err: unknown, where: string) => void,
+  menu: Menu,
 ): void {
   const guard = <A extends unknown[]>(where: string, fn: (...a: A) => Promise<void>) =>
     (...a: A): void => void fn(...a).catch((err: unknown) => onError(err, where));
@@ -157,6 +161,7 @@ export function wire(
   client.on(
     Events.InteractionCreate,
     guard('interaction', async (i: Interaction) => {
+      if (await handleMenuInteraction(i, menu)) return;
       if (i.isChatInputCommand()) {
         if (i.commandName === 'help') {
           await h.handleHelpCommand({
@@ -235,4 +240,118 @@ export function guildSource(client: Client, guildId: string) {
       return found;
     },
   };
+}
+
+const STYLE = {
+  primary: ButtonStyle.Primary,
+  secondary: ButtonStyle.Secondary,
+  success: ButtonStyle.Success,
+  danger: ButtonStyle.Danger,
+} as const;
+
+/** A menu as plain content with component rows. It mentions nobody. */
+export function renderMenu(view: MenuView) {
+  const components = view.rows.map((row) => {
+    if (row.kind === 'buttons') {
+      return new ActionRowBuilder<ButtonBuilder>().addComponents(
+        row.buttons.map((b) =>
+          new ButtonBuilder()
+            .setCustomId(b.id)
+            .setLabel(b.label)
+            .setStyle(STYLE[b.style ?? 'primary'])
+            .setDisabled(b.disabled ?? false),
+        ),
+      );
+    }
+    if (row.kind === 'user') {
+      return new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+        new UserSelectMenuBuilder().setCustomId(row.id).setPlaceholder(row.placeholder).setMinValues(1).setMaxValues(1),
+      );
+    }
+    return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(row.id)
+        .setPlaceholder(row.placeholder)
+        .setMinValues(row.min)
+        .setMaxValues(row.max)
+        .addOptions(row.options.slice(0, 25).map((o) => ({ label: o.label, value: o.value, default: o.default ?? false }))),
+    );
+  });
+  return { content: view.text.slice(0, 2000), components, allowedMentions: { parse: [] as never[] } };
+}
+
+export function renderModal(spec: ModalSpec): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId(spec.id)
+    .setTitle(spec.title.slice(0, 45))
+    .addComponents(
+      spec.inputs.map((inp) =>
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId(inp.id)
+            .setLabel(inp.label.slice(0, 45))
+            .setStyle(TextInputStyle.Short)
+            .setRequired(inp.required)
+            .setMaxLength(inp.maxLength)
+            .setValue(inp.value ?? ''),
+        ),
+      ),
+    );
+}
+
+
+/**
+ * Sends a menu result. `deferred` is how the interaction was acknowledged: 'update' edits the menu
+ * message, 'reply' answers a fresh ephemeral message; with none, the answer is the first response.
+ */
+async function answerMenu(i: Interaction, r: MenuResult, deferred: 'update' | 'reply' | null): Promise<void> {
+  if (!i.isRepliable()) return;
+  const x = i as unknown as {
+    reply(o: object): Promise<unknown>;
+    update?(o: object): Promise<unknown>;
+    editReply(o: object): Promise<unknown>;
+    followUp(o: object): Promise<unknown>;
+    showModal?(m: ModalBuilder): Promise<unknown>;
+  };
+  if ('modal' in r) {
+    await x.showModal?.(renderModal(r.modal));
+  } else if ('note' in r) {
+    if (deferred === 'update') await x.followUp(ephemeral(r.note));
+    else if (deferred === 'reply') await x.editReply({ content: r.note });
+    else await x.reply(ephemeral(r.note));
+  } else if (deferred) {
+    await x.editReply(renderMenu(r.view));
+  } else if (x.update) {
+    await x.update(renderMenu(r.view));
+  } else {
+    await x.reply({ ...renderMenu(r.view), flags: MessageFlags.Ephemeral });
+  }
+}
+
+/** Routes `/menu`, `/dev` and every menu component. Returns true when the interaction was a menu one. */
+export async function handleMenuInteraction(i: Interaction, menu: Menu): Promise<boolean> {
+  if (i.isChatInputCommand() && (i.commandName === 'menu' || i.commandName === 'dev')) {
+    const r = await (i.commandName === 'menu' ? menu.open({ userId: i.user.id }) : menu.openDev({ userId: i.user.id }));
+    if ('view' in r) await i.reply({ ...renderMenu(r.view), flags: MessageFlags.Ephemeral });
+    else if ('note' in r) await i.reply(ephemeral(r.note));
+    return true;
+  }
+  if (i.isModalSubmit() && isMenuId(i.customId)) {
+    const fields: Record<string, string> = {};
+    for (const [k, f] of i.fields.fields) if ('value' in f && typeof f.value === 'string') fields[k] = f.value;
+    if (i.isFromMessage()) await i.deferUpdate();
+    else await i.deferReply({ flags: MessageFlags.Ephemeral });
+    const r = await menu.interact({ userId: i.user.id, customId: i.customId, fields });
+    await answerMenu(i, r, i.isFromMessage() ? 'update' : 'reply');
+    return true;
+  }
+  if ((i.isButton() || i.isStringSelectMenu() || i.isUserSelectMenu()) && isMenuId(i.customId)) {
+    const values = i.isButton() ? [] : i.values;
+    const modal = opensModal(i.customId);
+    if (!modal) await i.deferUpdate();
+    const r = await menu.interact({ userId: i.user.id, customId: i.customId, values });
+    await answerMenu(i, r, modal ? null : 'update');
+    return true;
+  }
+  return false;
 }

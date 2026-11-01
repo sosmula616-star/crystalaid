@@ -127,4 +127,75 @@ describe('/internal ticket and PT routes', () => {
           .statusCode,
       ).toBe(409);
     }));
+
+  it('tell the menus what the acting person may do, and re-check each action', () =>
+    withApp({ redis }, async (ctx) => {
+      const deps = { db: ctx.db, config };
+      await seedDefaults(ctx.db, config.guildId);
+      await syncMember(deps, memberInput(1, [ADMIN_ROLE]));
+      await syncMember(deps, memberInput(2, [SUPPORT_ROLE]));
+      await syncMember(deps, memberInput(3, [SUPPORT_ROLE, CURATOR_ROLE]));
+      const access = async (n: number) =>
+        (await call(ctx, 'GET', `/internal/menu/access?actorDiscordId=${discordId(n)}`)).json() as {
+          level: string;
+          permissions: string[];
+        };
+
+      expect((await access(1)).level).toBe('ADMIN');
+      expect((await access(1)).permissions).toContain('shop.manage');
+      expect(await access(2)).toEqual({ level: 'SUPPORT', permissions: [] });
+      expect((await access(3)).permissions).toContain('shifts.edit');
+      expect(await access(99)).toEqual({ level: 'NONE', permissions: [] });
+
+      const day = HOUR.toISOString().slice(0, 10);
+      const list = () => call(ctx, 'GET', `/internal/pt?actorDiscordId=${discordId(3)}&date=${day}`);
+      expect((await list()).statusCode).toBe(200);
+
+      // Permissions: only an admin reads or changes them.
+      expect((await call(ctx, 'GET', `/internal/permissions?actorDiscordId=${discordId(3)}`)).statusCode).toBe(403);
+      expect(
+        (await call(ctx, 'PATCH', '/internal/permissions', { actorDiscordId: discordId(3), level: 'CURATOR', grants: [] }))
+          .statusCode,
+      ).toBe(403);
+      expect(
+        (await call(ctx, 'PATCH', '/internal/permissions', { actorDiscordId: discordId(1), level: 'CURATOR', grants: ['nope'] }))
+          .statusCode,
+      ).toBe(400);
+      const patched = await call(ctx, 'PATCH', '/internal/permissions', {
+        actorDiscordId: discordId(1),
+        level: 'CURATOR',
+        grants: ['reports.view'],
+      });
+      expect(patched.json()).toEqual({ SUPPORT: [], CURATOR: ['reports.view'] });
+
+      // The curator lost shifts.edit while a menu was open: viewing and editing are both refused now.
+      expect((await list()).statusCode).toBe(403);
+      expect(
+        (
+          await call(ctx, 'PUT', '/internal/pt', {
+            actorDiscordId: discordId(3),
+            startsAt: HOUR.toISOString(),
+            discordUserId: discordId(2),
+          })
+        ).statusCode,
+      ).toBe(403);
+      expect((await access(3)).permissions).toEqual(['reports.view']);
+    }));
+
+  it('list open tickets for an admin only', () =>
+    withApp({ redis }, async (ctx) => {
+      const deps = { db: ctx.db, config };
+      await seedDefaults(ctx.db, config.guildId);
+      await syncMember(deps, memberInput(1, [ADMIN_ROLE]));
+      await syncMember(deps, memberInput(3, [SUPPORT_ROLE, CURATOR_ROLE]));
+      await call(ctx, 'POST', '/internal/tickets', { actorDiscordId: discordId(50), username: 'asker', message: 'help' });
+
+      expect((await call(ctx, 'GET', `/internal/tickets/open?actorDiscordId=${discordId(3)}`)).statusCode).toBe(403);
+      const res = await call(ctx, 'GET', `/internal/tickets/open?actorDiscordId=${discordId(1)}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        total: 1,
+        items: [{ status: 'open', claimerDiscordId: null, claimerUsername: null }],
+      });
+    }));
 });

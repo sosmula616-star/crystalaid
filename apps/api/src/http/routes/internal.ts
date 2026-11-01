@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { and, count, eq, ne, sql } from 'drizzle-orm';
+import { and, count, desc, eq, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
@@ -11,6 +12,7 @@ import {
   CloseRequest,
   CreateTicketRequest,
   DiscordId,
+  InternalPermissionsPatch,
   MenuSettingsPatchRequest,
   MessageRequest,
   PtListQuery,
@@ -22,11 +24,18 @@ import {
   type CloseResponse,
   type CreateTicketResponse,
   type DiagnosticsResponse,
+  type MenuAccessResponse,
+  type OpenTicketsResponse,
+  type PermissionsResponse,
   type DueTicketsResponse,
   type Settings,
 } from '@crystalaid/contracts';
 import { staffMembers, tickets, users, type Db } from '@crystalaid/database';
-import { requireActor } from '../../services/actor.js';
+import { PERMISSIONS, hasPermission } from '@crystalaid/domain';
+import { alias } from 'drizzle-orm/pg-core';
+import { loadActor, requireActor } from '../../services/actor.js';
+import { getGrants, updateGrants } from '../../services/permissions.js';
+import { redactSecrets } from '../redact.js';
 import { listSlots, removeSlot, setSlot, dueReminders } from '../../services/pt.js';
 import { getSettings, patchSettings } from '../../services/settings.js';
 import {
@@ -51,6 +60,20 @@ function readVersion(): string {
   }
 }
 
+function readCommit(): string | null {
+  const env = process.env.GIT_COMMIT ?? process.env.COMMIT_SHA;
+  if (env) return env.slice(0, 12);
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * For the bot only; the service token authenticates the bot. Each route that acts for a person
  * also names them in `actorDiscordId`, and their current level is checked here on every request.
@@ -64,6 +87,67 @@ export function registerInternal(
   const svc = { db, config };
   const guard = { onRequest: [app.requireService] };
   const version = readVersion();
+  const commit = readCommit();
+
+  /** For the menus only: which buttons to show. Not an authority; each action checks again. */
+  app.get('/internal/menu/access', guard, async (request): Promise<MenuAccessResponse> => {
+    const { actorDiscordId } = ActorQuery.parse(request.query);
+    const actor = await loadActor(svc, actorDiscordId);
+    if (!actor) return { level: 'NONE', permissions: [] };
+    const permissions = PERMISSIONS.filter((p) => hasPermission(actor.level, p, actor.grants));
+    return { level: actor.level, permissions };
+  });
+
+  const readGrants = async (): Promise<PermissionsResponse> => ({
+    SUPPORT: await getGrants(db, config.guildId, 'SUPPORT'),
+    CURATOR: await getGrants(db, config.guildId, 'CURATOR'),
+  });
+
+  app.get('/internal/permissions', guard, async (request): Promise<PermissionsResponse> => {
+    const { actorDiscordId } = ActorQuery.parse(request.query);
+    await requireActor(svc, actorDiscordId, 'ADMIN');
+    return readGrants();
+  });
+
+  app.patch('/internal/permissions', guard, async (request): Promise<PermissionsResponse> => {
+    const body = InternalPermissionsPatch.parse(request.body);
+    const actor = await requireActor(svc, body.actorDiscordId, 'ADMIN');
+    await updateGrants(db, config.guildId, actor, body.level, body.grants);
+    return readGrants();
+  });
+
+  app.get('/internal/tickets/open', guard, async (request): Promise<OpenTicketsResponse> => {
+    const { actorDiscordId } = ActorQuery.parse(request.query);
+    await requireActor(svc, actorDiscordId, 'ADMIN');
+    const claimer = alias(users, 'claimer');
+    const where = and(eq(tickets.guildId, config.guildId), ne(tickets.status, 'closed'));
+    const [rows, totalRow] = await Promise.all([
+      db
+        .select({
+          ticketId: tickets.id,
+          status: tickets.status,
+          createdAt: tickets.createdAt,
+          claimerDiscordId: claimer.discordId,
+          claimerUsername: claimer.username,
+        })
+        .from(tickets)
+        .leftJoin(claimer, eq(claimer.id, tickets.claimedBy))
+        .where(where)
+        .orderBy(desc(tickets.createdAt))
+        .limit(25),
+      db.select({ n: count() }).from(tickets).where(where),
+    ]);
+    return {
+      items: rows.map((r) => ({
+        ticketId: r.ticketId,
+        status: r.status === 'claimed' ? 'claimed' : 'open',
+        createdAt: r.createdAt.toISOString(),
+        claimerDiscordId: r.claimerDiscordId,
+        claimerUsername: r.claimerUsername,
+      })),
+      total: totalRow[0]?.n ?? 0,
+    };
+  });
 
   app.get('/internal/members/:discordUserId', guard, async (request) => {
     const { discordUserId } = Params.parse(request.params);
@@ -138,7 +222,8 @@ export function registerInternal(
 
   app.get('/internal/pt', guard, async (request) => {
     const q = PtListQuery.parse(request.query);
-    await requireActor(svc, q.actorDiscordId, 'CURATOR');
+    const viewer = await requireActor(svc, q.actorDiscordId, 'CURATOR');
+    if (!hasPermission(viewer.level, 'shifts.edit', viewer.grants)) throw new AppError('FORBIDDEN', 'Not allowed', 403);
     const items = await listSlots(svc, q.date);
     return { items: items.map((s) => ({ ...s, startsAt: s.startsAt.toISOString() })) };
   });
@@ -190,17 +275,24 @@ export function registerInternal(
         .where(and(eq(tickets.guildId, config.guildId), ne(tickets.status, 'closed'))),
     ]);
     let queueSize: number | null = null;
+    let deadSize: number | null = null;
     let recentErrors: DiagnosticsResponse['recentErrors'] = [];
     if (redis && redisOk) {
       queueSize = await redis.xlen(STREAM).catch(() => null);
+      deadSize = await redis.xlen(DEAD_STREAM).catch(() => null);
       // XREVRANGE exists in Redis 5. Only the id and the error text are returned, never payloads.
       const entries = await redis.xrevrange(DEAD_STREAM, '+', '-', 'COUNT', 5).catch(() => []);
       recentErrors = entries.map(([id, fields]) => {
         const i = fields.indexOf('error');
-        return { id, error: i >= 0 ? (fields[i + 1] ?? '').slice(0, 300) : '' };
+        return { id, error: i >= 0 ? redactSecrets((fields[i + 1] ?? '').slice(0, 300)) : '' };
       });
     }
-    return { version, queueSize, openTickets: openRow[0]?.n ?? 0, database, redis: redisOk, recentErrors };
+    return {
+      version,
+      commit,
+      uptimeSeconds: Math.floor(process.uptime()),
+      queueSize,
+      deadSize, openTickets: openRow[0]?.n ?? 0, database, redis: redisOk, recentErrors };
   });
 
 }

@@ -8,11 +8,11 @@ export const COMMANDS = [
   new SlashCommandBuilder()
     .setName('menu')
     .setDescription('Меню настроек для администрации')
-    .setContexts(InteractionContextType.Guild),
+    .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM),
   new SlashCommandBuilder()
     .setName('dev')
     .setDescription('Меню разработчика')
-    .setContexts(InteractionContextType.Guild),
+    .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM),
 ].map((c) => c.toJSON());
 
 /** Registers the guild commands (an instant overwrite of the whole set). */

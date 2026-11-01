@@ -3,12 +3,21 @@ import {
   ClaimResponse,
   CloseResponse,
   CreateTicketResponse,
+  DiagnosticsResponse,
   DueTicketsResponse,
+  MenuAccessResponse,
+  OpenTicketsResponse,
+  PermissionsResponse,
+  PtListResponse,
+  SettingsSchema,
   MessageResponse,
   PtRemindersResponse,
   type ClaimRequest,
   type CreateTicketRequest,
+  type Settings,
+  type SettingsPatch,
 } from '@crystalaid/contracts';
+import type { Permission } from '@crystalaid/domain';
 import type { z } from 'zod';
 
 export class ApiError extends Error {
@@ -94,6 +103,38 @@ export class ApiClient {
   }
   reminders(): Promise<PtRemindersResponse> {
     return this.call('GET', '/internal/pt/reminders', PtRemindersResponse);
+  }
+  // ---------- menus: the API checks the level of `actorDiscordId` on each of these ----------
+
+  menuAccess(actorDiscordId: string): Promise<MenuAccessResponse> {
+    return this.call('GET', '/internal/menu/access', MenuAccessResponse, undefined, { actorDiscordId });
+  }
+  ptList(actorDiscordId: string, date: string): Promise<z.infer<typeof PtListResponse>> {
+    return this.call('GET', '/internal/pt', PtListResponse, undefined, { actorDiscordId, date });
+  }
+  async ptSet(actorDiscordId: string, startsAt: string, discordUserId: string): Promise<void> {
+    await this.call('PUT', '/internal/pt', passthrough, { actorDiscordId, startsAt, discordUserId });
+  }
+  async ptRemove(actorDiscordId: string, startsAt: string, discordUserId: string): Promise<void> {
+    await this.call('DELETE', '/internal/pt', passthrough, undefined, { actorDiscordId, startsAt, discordUserId });
+  }
+  settings(actorDiscordId: string): Promise<Settings> {
+    return this.call('GET', '/internal/menu/settings', SettingsSchema, undefined, { actorDiscordId });
+  }
+  patchSettings(actorDiscordId: string, patch: SettingsPatch): Promise<Settings> {
+    return this.call('PATCH', '/internal/menu/settings', SettingsSchema, { actorDiscordId, patch });
+  }
+  permissions(actorDiscordId: string): Promise<PermissionsResponse> {
+    return this.call('GET', '/internal/permissions', PermissionsResponse, undefined, { actorDiscordId });
+  }
+  patchPermissions(actorDiscordId: string, level: 'SUPPORT' | 'CURATOR', grants: Permission[]) {
+    return this.call('PATCH', '/internal/permissions', PermissionsResponse, { actorDiscordId, level, grants });
+  }
+  openTickets(actorDiscordId: string): Promise<OpenTicketsResponse> {
+    return this.call('GET', '/internal/tickets/open', OpenTicketsResponse, undefined, { actorDiscordId });
+  }
+  diagnostics(actorDiscordId: string): Promise<DiagnosticsResponse> {
+    return this.call('GET', '/internal/diagnostics', DiagnosticsResponse, undefined, { actorDiscordId });
   }
 }
 

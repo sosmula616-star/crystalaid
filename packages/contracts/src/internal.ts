@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ITEM_KEYS } from '@crystalaid/domain';
+import { ITEM_KEYS, PERMISSIONS } from '@crystalaid/domain';
 import { SettingsPatch } from './api.js';
 import { DiscordId } from './events.js';
 
@@ -116,10 +116,41 @@ export const MenuSettingsPatchRequest = z.object({ ...Actor, patch: SettingsPatc
 
 export const DiagnosticsResponse = z.object({
   version: z.string(),
+  commit: z.string().nullable(),
+  uptimeSeconds: z.number().int(),
   queueSize: z.number().int().nullable(),
+  deadSize: z.number().int().nullable(),
   openTickets: z.number().int(),
   database: z.boolean(),
   redis: z.boolean(),
   recentErrors: z.array(z.object({ id: z.string(), error: z.string() })),
 });
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponse>;
+
+/** What the menus need to decide which buttons to show. Every action is still checked on its own. */
+export const MenuAccessResponse = z.object({
+  level: z.enum(['NONE', 'SUPPORT', 'CURATOR', 'ADMIN', 'DEVELOPER']),
+  permissions: z.array(z.enum(PERMISSIONS)),
+});
+export type MenuAccessResponse = z.infer<typeof MenuAccessResponse>;
+
+export const InternalPermissionsPatch = z.object({
+  ...Actor,
+  level: z.enum(['SUPPORT', 'CURATOR']),
+  grants: z.array(z.enum(PERMISSIONS)),
+});
+export type InternalPermissionsPatch = z.infer<typeof InternalPermissionsPatch>;
+
+export const OpenTicketsResponse = z.object({
+  items: z.array(
+    z.object({
+      ticketId: TicketId,
+      status: z.enum(['open', 'claimed']),
+      createdAt: IsoDate,
+      claimerDiscordId: DiscordId.nullable(),
+      claimerUsername: z.string().nullable(),
+    }),
+  ),
+  total: z.number().int(),
+});
+export type OpenTicketsResponse = z.infer<typeof OpenTicketsResponse>;
