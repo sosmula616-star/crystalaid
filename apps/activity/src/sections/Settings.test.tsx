@@ -41,6 +41,17 @@ describe('Settings', () => {
     expect(setLocale).toHaveBeenCalledWith('en');
   });
 
+  it('moves aria-pressed to the chosen theme', async () => {
+    document.documentElement.dataset.theme = 'indigo';
+    const { user } = show();
+    const crystal = screen.getByRole('button', { name: 'Кристалл' });
+    const indigo = screen.getByRole('button', { name: 'Индиго' });
+    expect(crystal.getAttribute('aria-pressed')).toBe('false');
+    await user.click(crystal);
+    expect(crystal.getAttribute('aria-pressed')).toBe('true');
+    expect(indigo.getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('lists all six themes and lets only Crystal be chosen', async () => {
     document.documentElement.dataset.theme = 'indigo';
     const { user } = show();

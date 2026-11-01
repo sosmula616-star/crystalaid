@@ -4,6 +4,7 @@ import { Button, readStored, ToastProvider } from '@crystalaid/design-system';
 import { createTranslator, isLocale, resolveLocale, type Locale, type MessageKey } from '@crystalaid/i18n';
 import { ApiError, type ApiClient } from '../api/client.js';
 import logoUrl from '../assets/logo.png';
+import { LOCALE_KEY } from '../storage-keys.js';
 import type { Session } from './session.js';
 import styles from './AuthGate.module.css';
 
@@ -58,8 +59,6 @@ function describeFailure(error: unknown): Failure {
   }
 }
 
-export const LOCALE_KEY = 'crystalaid.locale';
-
 function storedLocale(): Locale | null {
   const value = readStored(LOCALE_KEY);
   return value !== null && isLocale(value) ? value : null;
@@ -70,13 +69,19 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
   const [locale, setLocale] = useState<Locale>(() => storedLocale() ?? resolveLocale(navigator.language));
   const run = useRef(0);
   const started = useRef(false);
+  // A language chosen in this session wins over Discord's even when saving it failed.
+  const chosen = useRef<Locale | null>(null);
+  const chooseLocale = useCallback((next: Locale) => {
+    chosen.current = next;
+    setLocale(next);
+  }, []);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   // The language the person chose in Settings wins over Discord's. Without a
   // known Discord locale the current one stays.
   const adoptDiscordLocale = useCallback(() => {
-    if (storedLocale()) return;
+    if (chosen.current || storedLocale()) return;
     const discord = discordLocale?.();
     if (discord) setLocale(resolveLocale(discord));
   }, [discordLocale]);
@@ -126,7 +131,7 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
   if (state.phase === 'ready') {
     return (
       <ToastProvider closeLabel={t('toast.close')} regionLabel={t('toast.region')}>
-        {children(state.me, { t, locale, setLocale, retryAuth, reportAuthFailure })}
+        {children(state.me, { t, locale, setLocale: chooseLocale, retryAuth, reportAuthFailure })}
       </ToastProvider>
     );
   }

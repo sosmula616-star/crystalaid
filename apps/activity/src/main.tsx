@@ -8,8 +8,8 @@ import { App } from './App.js';
 import { createApiClient } from './api/client.js';
 import { createDiscordPort } from './auth/discord.js';
 import { createSession } from './auth/session.js';
+import { THEME_KEY } from './storage-keys.js';
 
-const THEME_KEY = 'crystalaid.theme';
 
 async function start() {
   applyTheme(readStored(THEME_KEY) ?? 'crystal');

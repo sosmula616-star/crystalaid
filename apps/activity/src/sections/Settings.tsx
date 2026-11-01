@@ -1,17 +1,17 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { Button, Select, THEMES, applyTheme, writeStored } from '@crystalaid/design-system';
 import { isLocale, type Locale } from '@crystalaid/i18n';
-import { LOCALE_KEY } from '../auth/AuthGate.js';
 import { useShell } from '../shell/context.js';
+import { LOCALE_KEY, THEME_KEY } from '../storage-keys.js';
 import styles from './Settings.module.css';
 
-const THEME_KEY = 'crystalaid.theme';
 const LOCALES: readonly Locale[] = ['ru', 'en'];
 
 /** Language and theme. Only the free theme can be chosen until the store opens. */
 export default function Settings() {
   const { t, locale, setLocale } = useShell();
   const themeHeading = useId();
+  const [current, setCurrent] = useState<string | undefined>(() => document.documentElement.dataset.theme);
 
   const changeLocale = (value: string) => {
     if (!isLocale(value)) return;
@@ -20,7 +20,9 @@ export default function Settings() {
   };
 
   const chooseTheme = (id: string) => {
-    writeStored(THEME_KEY, applyTheme(id));
+    const applied = applyTheme(id);
+    writeStored(THEME_KEY, applied);
+    setCurrent(applied);
   };
 
   return (
@@ -38,7 +40,7 @@ export default function Settings() {
         <ul className={styles.themes}>
           {THEMES.map((theme) => {
             const reasonId = `${themeHeading}-${theme.id}`;
-            const active = document.documentElement.dataset.theme === theme.id;
+            const active = current === theme.id;
             return (
               <li key={theme.id} className={styles.theme}>
                 <Button

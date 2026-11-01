@@ -161,6 +161,20 @@ describe('AuthGate', () => {
     localStorage.clear();
   });
 
+  it('keeps a language chosen this session when saving it failed, also after a retry', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    const { context } = setup({ locale: 'ru' });
+    expect(await screen.findByText('hello alice')).toBeTruthy();
+    act(() => context.current?.setLocale('en'));
+    expect(document.documentElement.lang).toBe('en');
+    act(() => context.current?.retryAuth());
+    await waitFor(() => expect(screen.getByText('hello alice')).toBeTruthy());
+    expect(document.documentElement.lang).toBe('en');
+    vi.restoreAllMocks();
+  });
+
   it('ignores a stored language it does not know', async () => {
     localStorage.setItem('crystalaid.locale', 'xx');
     setup({ locale: 'en-US' });

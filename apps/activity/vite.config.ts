@@ -6,10 +6,10 @@ const here = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  // Mode-specific values of apps/activity/.env.<mode> (only `mock` has one): the shared
-  // envDir below is the repository root, so these are defined here.
+  // The dev-mock switch from apps/activity/.env.mock (only the `mock` mode has one): the shared
+  // envDir below is the repository root, so it is defined here. Nothing else is taken from there.
   define: Object.fromEntries(
-    Object.entries(loadEnv(mode, here, 'VITE_')).map(([key, value]) => [`import.meta.env.${key}`, JSON.stringify(value)]),
+    Object.entries(loadEnv(mode, here, 'VITE_DEV_MOCK')).map(([key, value]) => [`import.meta.env.${key}`, JSON.stringify(value)]),
   ),
   // The one .env lives in the repository root, next to the API's.
   envDir: fileURLToPath(new URL('../..', import.meta.url)),
