@@ -1,0 +1,65 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+}
+
+.box {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  height: var(--space-5);
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  color: var(--color-on-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast),
+    border-color var(--motion-fast);
+}
+
+/* Drawn smaller, but the hit area stays at the touch target size. */
+.box::before {
+  content: '';
+  position: absolute;
+  inset: calc((var(--space-5) - var(--touch-target)) / 2);
+}
+
+.box[data-state='checked'] {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.box:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.box:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.indicator {
+  display: inline-flex;
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) 0;
+  font: var(--text-body);
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+
+.label[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

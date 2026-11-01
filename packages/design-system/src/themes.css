@@ -1,0 +1,92 @@
+/* Keep in sync with themes.ts; a test enforces it. Hex colors are allowed only here and in tokens.css. */
+
+:root,
+[data-theme='crystal'] {
+  --color-background: #0B1220;
+  --color-surface: #111A2C;
+  --color-surface-elevated: #18233A;
+  --color-surface-hover: #1F2C48;
+  --color-border: #2A3A5A;
+  --color-foreground: #EAF1FA;
+  --color-muted: #9AACC6;
+  --color-primary: #6FD3F7;
+  --color-on-primary: #06263A;
+  --color-success: #5BD6A0;
+  --color-warning: #F5C451;
+  --color-danger: #F47174;
+}
+
+[data-theme='indigo'] {
+  --color-background: #12131F;
+  --color-surface: #191A2B;
+  --color-surface-elevated: #212338;
+  --color-surface-hover: #292C45;
+  --color-border: #34375A;
+  --color-foreground: #ECEDF8;
+  --color-muted: #9EA1C0;
+  --color-primary: #8E8CFF;
+  --color-on-primary: #10102C;
+  --color-success: #5BD6A0;
+  --color-warning: #F5C451;
+  --color-danger: #F47174;
+}
+
+[data-theme='amber'] {
+  --color-background: #171412;
+  --color-surface: #1F1B18;
+  --color-surface-elevated: #28231F;
+  --color-surface-hover: #312B26;
+  --color-border: #40382F;
+  --color-foreground: #F3EEE9;
+  --color-muted: #AEA399;
+  --color-primary: #F2B04A;
+  --color-on-primary: #2B1A00;
+  --color-success: #5BD6A0;
+  --color-warning: #F5C451;
+  --color-danger: #F47174;
+}
+
+[data-theme='emerald'] {
+  --color-background: #0F1614;
+  --color-surface: #151F1C;
+  --color-surface-elevated: #1C2925;
+  --color-surface-hover: #23332E;
+  --color-border: #2F443D;
+  --color-foreground: #E8F2EE;
+  --color-muted: #93A8A0;
+  --color-primary: #3FD9A4;
+  --color-on-primary: #04291D;
+  --color-success: #5BD6A0;
+  --color-warning: #F5C451;
+  --color-danger: #F47174;
+}
+
+[data-theme='graphite'] {
+  --color-background: #121416;
+  --color-surface: #181B1E;
+  --color-surface-elevated: #1F2327;
+  --color-surface-hover: #262B30;
+  --color-border: #363C42;
+  --color-foreground: #EDF0F2;
+  --color-muted: #99A2AA;
+  --color-primary: #C6F24E;
+  --color-on-primary: #1A2200;
+  --color-success: #5BD6A0;
+  --color-warning: #F5C451;
+  --color-danger: #F47174;
+}
+
+[data-theme='raspberry'] {
+  --color-background: #1A1216;
+  --color-surface: #23191E;
+  --color-surface-elevated: #2D2127;
+  --color-surface-hover: #372930;
+  --color-border: #49363F;
+  --color-foreground: #F6EAF0;
+  --color-muted: #B59DA9;
+  --color-primary: #F2618F;
+  --color-on-primary: #34061A;
+  --color-success: #5BD6A0;
+  --color-warning: #F5C451;
+  --color-danger: #F47174;
+}

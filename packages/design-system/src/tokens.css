@@ -1,0 +1,72 @@
+:root {
+  color-scheme: dark;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 80px;
+
+  --radius-1: 4px;
+  --radius-2: 6px;
+  --radius-3: 8px;
+  --radius-4: 10px;
+  --radius-5: 12px;
+  --radius-6: 16px;
+  --radius-7: 20px;
+  --radius-full: 9999px;
+
+  --measure: 40ch;
+  --content-max: 1440px;
+  --letter-wide: 0.04em;
+
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+  --text-display: 600 clamp(1.75rem, 2.4vw + 1.125rem, 2.75rem) / 1.1 var(--font-sans);
+  --text-heading: 600 clamp(1.375rem, 1.2vw + 1rem, 1.875rem) / 1.2 var(--font-sans);
+  --text-subheading: 600 clamp(1.0625rem, 0.5vw + 0.875rem, 1.25rem) / 1.3 var(--font-sans);
+  --text-body: 400 0.9375rem / 1.5 var(--font-sans);
+  --text-label: 500 0.8125rem / 1.3 var(--font-sans);
+  --text-caption: 400 0.75rem / 1.4 var(--font-sans);
+  --text-mono: 400 0.8125rem / 1.5 var(--font-mono);
+
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --motion-spin: 700ms;
+  --motion-shimmer: 1400ms;
+
+  --touch-target: 40px;
+
+  --layer-overlay: 100;
+  --layer-dialog: 110;
+  --layer-popper: 120;
+  --layer-toast: 130;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+    --motion-spin: 0ms;
+    --motion-shimmer: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

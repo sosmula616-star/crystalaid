@@ -1,0 +1,119 @@
+/* --toast-bottom-offset lifts the stack above a bottom navigation. */
+.viewport {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: var(--layer-toast);
+  /* The stack spans the screen edge but must not block what is under its empty part (the bottom bar). */
+  pointer-events: none;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(420px, 100dvw);
+  margin: 0;
+  padding-top: var(--space-4);
+  padding-right: max(var(--space-4), env(safe-area-inset-right));
+  padding-bottom: calc(max(var(--space-4), env(safe-area-inset-bottom)) + var(--toast-bottom-offset, 0px));
+  padding-left: max(var(--space-4), env(safe-area-inset-left));
+  list-style: none;
+  outline: none;
+}
+
+/* Narrow: the stack spans the width at the bottom. */
+@media (max-width: 480px) {
+  .viewport {
+    left: 0;
+    width: 100%;
+  }
+}
+
+.toast {
+  /* The viewport lets clicks through; a toast itself stays clickable, also over a modal dialog. */
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-4);
+  background: var(--color-surface-elevated);
+  color: var(--color-foreground);
+  overflow-wrap: anywhere;
+}
+
+.toast[data-state='open'] {
+  animation: slide-up var(--motion-base) ease-out;
+}
+
+.toast[data-state='closed'] {
+  animation: fade-out var(--motion-fast) ease-in;
+}
+
+.success {
+  border-left-color: var(--color-success);
+}
+
+.warning {
+  border-left-color: var(--color-warning);
+}
+
+.danger {
+  border-left-color: var(--color-danger);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.title {
+  font: var(--text-label);
+}
+
+.description {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  margin: calc(var(--space-2) * -1) calc(var(--space-3) * -1) calc(var(--space-2) * -1) 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--color-surface-hover);
+}
+
+.close:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}

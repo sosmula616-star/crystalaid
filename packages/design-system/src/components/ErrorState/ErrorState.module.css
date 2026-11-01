@@ -1,0 +1,27 @@
+.error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-7) var(--space-4);
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  color: var(--color-danger);
+  font: var(--text-subheading);
+}
+
+.description {
+  max-width: 40ch;
+  margin: 0;
+  color: var(--color-muted);
+  font: var(--text-body);
+}
+
+.action {
+  margin-top: var(--space-2);
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@crystalaid/bot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts start",
+    "register": "tsx src/main.ts register"
+  },
+  "dependencies": {
+    "@crystalaid/config": "workspace:*",
+    "@crystalaid/contracts": "workspace:*",
+    "@crystalaid/domain": "workspace:*",
+    "discord.js": "^14.27.0",
+    "ioredis": "^5.10.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.7"
+  }
+}

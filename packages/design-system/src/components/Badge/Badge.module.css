@@ -1,0 +1,28 @@
+.badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  overflow: hidden;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-7);
+  font: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.neutral {
+  color: var(--color-muted);
+}
+.primary {
+  color: var(--color-primary);
+}
+.success {
+  color: var(--color-success);
+}
+.warning {
+  color: var(--color-warning);
+}
+.danger {
+  color: var(--color-danger);
+}

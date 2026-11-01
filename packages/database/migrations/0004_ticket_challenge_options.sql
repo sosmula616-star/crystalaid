@@ -1,0 +1,1 @@
+ALTER TABLE "ticket_challenges" ADD COLUMN "options" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -1,0 +1,191 @@
+.root {
+  position: relative;
+  container-type: inline-size;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Wide containers: overflow scrolls inside the component, never the page. */
+.scroller {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-5);
+  background: var(--color-surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--color-foreground);
+  font: var(--text-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.caption {
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-muted);
+  font: var(--text-label);
+  text-align: start;
+}
+
+.th,
+.td {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow-wrap: anywhere;
+  text-align: start;
+  vertical-align: middle;
+}
+
+.th {
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font: var(--text-label);
+}
+
+.td {
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 400;
+}
+
+.row:last-child > .td {
+  border-bottom: 0;
+}
+
+/* Wide containers render no toggle column (header and cells hidden). */
+.toggleCell {
+  display: none;
+  width: var(--touch-target);
+  padding-block: var(--space-1);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: var(--color-surface-hover);
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentcolor;
+  border-bottom: 2px solid currentcolor;
+  transform: rotate(45deg);
+  transition: transform var(--motion-fast);
+}
+
+.row[data-expanded='true'] .chevron {
+  transform: rotate(-135deg);
+}
+
+.empty {
+  padding: var(--space-6) var(--space-4);
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Narrow containers: rows become cards. Explicit roles in the markup keep table semantics. */
+@container (max-width: 720px) {
+  .scroller {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .table,
+  .table tbody {
+    display: block;
+  }
+
+  .caption {
+    display: block;
+    padding-inline: 0;
+  }
+
+  /* The header row stays in the accessibility tree but is visually hidden. */
+  .head {
+    position: absolute;
+    display: block;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--touch-target);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-5);
+    background: var(--color-surface);
+  }
+
+  .td {
+    display: block;
+    grid-column: 1;
+    padding: var(--space-1) 0;
+    border: 0;
+  }
+
+  /* Visual label only (empty alt text); the real column header stays in the hidden header row. */
+  .td[data-label]::before {
+    content: attr(data-label);
+    content: attr(data-label) / '';
+    display: block;
+    color: var(--color-muted);
+    font: var(--text-caption);
+  }
+
+  th.td {
+    color: var(--color-foreground);
+    font: var(--text-subheading);
+  }
+
+  th.td[data-label]::before {
+    content: none;
+  }
+
+  .td.collapsed {
+    display: none;
+  }
+
+  td.toggleCell {
+    display: block;
+    grid-row: 1;
+    grid-column: 2;
+    width: auto;
+    padding: 0;
+  }
+}

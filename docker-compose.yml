@@ -1,0 +1,23 @@
+# Local services. Ports are published on the loopback interface only. Passwords come from the
+# environment or from the .env file next to this file; nothing is stored here.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: crystalaid
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: crystalaid
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+volumes:
+  pgdata:
+  redisdata:

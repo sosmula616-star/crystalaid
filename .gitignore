@@ -6,5 +6,13 @@ coverage/
 .env
 .env.*
 !.env.example
+# Holds only the dev-mock switch, no secret.
+!apps/activity/.env.mock
 
 .superpowers/
+
+crystalaid.config.json
+
+# Playwright
+apps/activity/e2e/screenshots/
+apps/activity/e2e/.results/
