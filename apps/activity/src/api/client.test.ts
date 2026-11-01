@@ -69,8 +69,8 @@ describe('api client', () => {
   });
 
   it('turns an error body of the wrong shape into INTERNAL', async () => {
-    const { client } = setup(() => new Response('<html>bad gateway</html>', { status: 502 }));
-    await expect(client.get('/me', Thing)).rejects.toMatchObject({ code: 'INTERNAL', status: 502 });
+    const { client } = setup(() => new Response('<html>bad gateway</html>', { status: 500 }));
+    await expect(client.get('/me', Thing)).rejects.toMatchObject({ code: 'INTERNAL', status: 500 });
   });
 
   it('turns a failed fetch into NETWORK', async () => {
@@ -124,5 +124,73 @@ describe('api client', () => {
     const results = await Promise.all(Array.from({ length: 5 }, (_, i) => client.get(`/r${i}`, Thing)));
     expect(results).toEqual(Array.from({ length: 5 }, () => ({ n: 4 })));
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh again for a 401 that arrives after another request already refreshed', async () => {
+    let releaseSlow!: (r: Response) => void;
+    const slow = new Promise<Response>((r) => (releaseSlow = r));
+    let tokenNow = 'old';
+    const refresh = vi.fn(async () => {
+      tokenNow = 'new';
+    });
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (auth(init) === 'Bearer new') return json(200, { n: 5 });
+      return String(url).endsWith('/slow') ? slow : json(401, errorBody('TOKEN_EXPIRED'));
+    });
+    const client = createApiClient({
+      getToken: () => tokenNow,
+      refresh,
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const slowRequest = client.get('/slow', Thing);
+    await client.get('/fast', Thing); // 401, refresh, retry with the new token
+    expect(refresh).toHaveBeenCalledTimes(1);
+    releaseSlow(json(401, errorBody('TOKEN_EXPIRED'))); // the late 401, sent with 'old'
+    await expect(slowRequest).resolves.toEqual({ n: 5 });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a POST with the same body and the new token', async () => {
+    const { client, fetchMock } = setup((_init, call) =>
+      call === 1 ? json(401, errorBody('TOKEN_EXPIRED')) : json(200, { n: 6 }),
+    );
+    await expect(client.post('/things', { a: 1 }, Thing)).resolves.toEqual({ n: 6 });
+    const [first, second] = fetchMock.mock.calls.map((c) => c[1]!);
+    expect(first!.method).toBe('POST');
+    expect(second!.method).toBe('POST');
+    expect(second!.body).toBe('{"a":1}');
+    expect(auth(second)).toBe('Bearer new');
+  });
+
+  it.each([502, 503, 504])('turns a %i without an error envelope into DISCORD_UNAVAILABLE', async (status) => {
+    const { client } = setup(() => new Response('<html>gateway</html>', { status }));
+    await expect(client.get('/me', Thing)).rejects.toMatchObject({ code: 'DISCORD_UNAVAILABLE', status });
+  });
+
+  it('keeps the code of a 503 that carries the error envelope', async () => {
+    const { client } = setup(() => json(503, errorBody('DISCORD_UNAVAILABLE', 'Discord is down')));
+    await expect(client.get('/me', Thing)).rejects.toMatchObject({ code: 'DISCORD_UNAVAILABLE', message: 'Discord is down' });
+  });
+
+  it('aborts a request after the timeout and reports NETWORK', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(
+        (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init!.signal!.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          }),
+      );
+      const client = createApiClient({
+        getToken: () => 't',
+        refresh: async () => {},
+        fetch: fetchMock as unknown as typeof fetch,
+      });
+      const result = client.get('/me', Thing).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await result).toMatchObject({ code: 'NETWORK', status: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

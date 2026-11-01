@@ -18,6 +18,9 @@
   --radius-5: 12px;
   --radius-6: 16px;
   --radius-7: 20px;
+  --radius-full: 9999px;
+
+  --measure: 40ch;
 
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Consolas, monospace;

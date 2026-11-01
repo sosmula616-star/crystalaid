@@ -34,6 +34,8 @@ export interface ApiClientDeps {
   fetch?: typeof fetch;
   /** Defaults to `/api`: Discord URL Mapping and the Vite dev proxy strip it. */
   baseUrl?: string;
+  /** A request that takes longer is aborted and reported as NETWORK. Default 15 s. */
+  timeoutMs?: number;
 }
 
 interface ErrorEnvelope {
@@ -51,16 +53,21 @@ function readEnvelope(body: unknown): ErrorEnvelope | null {
   return typeof requestId === 'string' ? { code, message, requestId } : { code, message };
 }
 
-async function readJson(response: Response): Promise<unknown> {
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+
+async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
   try {
     return await response.json();
-  } catch {
+  } catch (cause) {
+    // A body that is not JSON is data (handled by the caller); a timeout is not.
+    if (signal.aborted) throw cause;
     return undefined;
   }
 }
 
 export function createApiClient(deps: ApiClientDeps): ApiClient {
   const baseUrl = deps.baseUrl ?? '/api';
+  const timeoutMs = deps.timeoutMs ?? 15_000;
   const doFetch = (...args: Parameters<typeof fetch>) => (deps.fetch ?? fetch)(...args);
   let refreshing: Promise<void> | null = null;
 
@@ -77,7 +84,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     path: string,
     body: unknown,
     schema: ResponseSchema<T>,
-  ): Promise<{ token: string | null; result: T }> {
+  ): Promise<T> {
     const token = deps.getToken();
     const headers: Record<string, string> = {};
     if (token) headers.authorization = `Bearer ${token}`;
@@ -87,21 +94,29 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
       init.body = JSON.stringify(body);
     }
 
+    const controller = new AbortController();
+    init.signal = controller.signal;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
+    let payload: unknown;
     try {
       response = await doFetch(`${baseUrl}${path}`, init);
+      payload = await readJson(response, controller.signal);
     } catch (cause) {
       throw new ApiError('NETWORK', cause instanceof Error ? cause.message : 'Network error', 0);
+    } finally {
+      clearTimeout(timer);
     }
 
-    const payload = await readJson(response);
     if (!response.ok) {
       const envelope = readEnvelope(payload);
-      if (!envelope) throw new ApiError('INTERNAL', `Unexpected response (${response.status})`, response.status);
-      throw new ApiError(envelope.code, envelope.message, response.status, envelope.requestId);
+      if (envelope) throw new ApiError(envelope.code, envelope.message, response.status, envelope.requestId);
+      // A gateway in front of the API answered instead of it: treat that as an outage.
+      const code = GATEWAY_STATUSES.has(response.status) ? 'DISCORD_UNAVAILABLE' : 'INTERNAL';
+      throw new ApiError(code, `Unexpected response (${response.status})`, response.status);
     }
     try {
-      return { token, result: schema.parse(payload) };
+      return schema.parse(payload);
     } catch {
       throw new ApiError('INTERNAL', 'Response does not match the expected shape', response.status);
     }
@@ -110,13 +125,13 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
   async function request<T>(method: string, path: string, body: unknown, schema: ResponseSchema<T>): Promise<T> {
     const usedToken = deps.getToken();
     try {
-      return (await attempt(method, path, body, schema)).result;
+      return await attempt(method, path, body, schema);
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401 || error.code !== 'TOKEN_EXPIRED') throw error;
       // A request that failed with the old token while another one already refreshed
       // only needs the retry, not a second sign-in.
       if (deps.getToken() === usedToken) await refreshOnce();
-      return (await attempt(method, path, body, schema)).result;
+      return await attempt(method, path, body, schema);
     }
   }
 

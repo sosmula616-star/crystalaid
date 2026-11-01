@@ -3,7 +3,7 @@ import '@crystalaid/design-system/styles.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ActivityAuthResponse } from '@crystalaid/contracts';
-import { ToastProvider, TooltipProvider, applyTheme, readStored } from '@crystalaid/design-system';
+import { TooltipProvider, applyTheme, readStored } from '@crystalaid/design-system';
 import { App } from './App.js';
 import { createApiClient } from './api/client.js';
 import { createDiscordPort } from './auth/discord.js';
@@ -27,10 +27,8 @@ const session = createSession({
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ToastProvider>
-      <TooltipProvider>
-        <App session={session} api={api} discordLocale={() => sdk.locale} />
-      </TooltipProvider>
-    </ToastProvider>
+    <TooltipProvider>
+      <App session={session} api={api} discordLocale={() => sdk.locale} />
+    </TooltipProvider>
   </StrictMode>,
 );

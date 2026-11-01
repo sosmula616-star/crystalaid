@@ -76,4 +76,19 @@ describe('session', () => {
     expect(sdk.authenticate).toHaveBeenCalledTimes(1);
     expect(sdk.ready).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['ready', 'authorize'] as const)('reports a stalled %s as NETWORK after the timeout', async (step) => {
+    vi.useFakeTimers();
+    try {
+      const { sdk, login } = setup();
+      (sdk[step] as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise(() => {}));
+      const session = createSession({ sdk, login, timeoutMs: 15_000 });
+      const result = session.start().catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await result).toMatchObject({ code: 'NETWORK' });
+      expect(login).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

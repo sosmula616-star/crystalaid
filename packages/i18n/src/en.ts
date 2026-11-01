@@ -36,4 +36,6 @@ export const en: Record<MessageKey, string> = {
   'auth.unavailable.description': 'The server or Discord is unreachable. Check your connection and try again.',
   'auth.error.title': 'Could not sign in',
   'auth.error.description': 'Something went wrong. Please try again.',
+  'toast.close': 'Close',
+  'toast.region': 'Notifications',
 };

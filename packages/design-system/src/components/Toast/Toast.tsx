@@ -107,7 +107,7 @@ export function ToastProvider({ children, closeLabel = 'Close', regionLabel = 'N
             </RadixToast.Close>
           </RadixToast.Root>
         ))}
-        <RadixToast.Viewport className={styles.viewport} />
+        <RadixToast.Viewport className={styles.viewport} label={`${regionLabel} ({hotkey})`} />
       </RadixToast.Provider>
     </ToastContext.Provider>
   );

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MeResponse } from '@crystalaid/contracts';
-import { Button } from '@crystalaid/design-system';
+import { Button, ToastProvider } from '@crystalaid/design-system';
 import { createTranslator, resolveLocale, type Locale, type MessageKey } from '@crystalaid/i18n';
 import { ApiError, type ApiClient } from '../api/client.js';
 import logoUrl from '../assets/logo.png';
@@ -12,6 +12,13 @@ type Translate = ReturnType<typeof createTranslator>;
 export interface AuthGateContext {
   t: Translate;
   locale: Locale;
+  /** Runs the sign-in again, as the Retry button does. */
+  retryAuth(): void;
+  /**
+   * Call when a request failed even after the silent re-login (the sign-in itself
+   * failed). The gate then replaces the app with its failure screen and Retry.
+   */
+  reportAuthFailure(error: unknown): void;
 }
 
 export interface AuthGateProps {
@@ -55,21 +62,42 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
   const run = useRef(0);
   const started = useRef(false);
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  // Without a known Discord locale the current one stays.
+  const adoptDiscordLocale = useCallback(() => {
+    const discord = discordLocale?.();
+    if (discord) setLocale(resolveLocale(discord));
+  }, [discordLocale]);
+
   const signIn = useCallback(async () => {
     const id = ++run.current;
     setState({ phase: 'loading' });
     try {
       await session.start();
+      if (id === run.current) adoptDiscordLocale();
       const me = await api.get('/me', MeResponse);
       if (id !== run.current) return;
-      setLocale(resolveLocale(discordLocale?.()));
       setState({ phase: 'ready', me });
     } catch (error) {
       if (id !== run.current) return;
-      setLocale(resolveLocale(discordLocale?.()));
+      adoptDiscordLocale();
       setState({ phase: 'failed', error });
     }
-  }, [session, api, discordLocale]);
+  }, [session, api, adoptDiscordLocale]);
+
+  const retryAuth = useCallback(() => void signIn(), [signIn]);
+
+  const reportAuthFailure = useCallback((error: unknown) => {
+    run.current += 1;
+    setState({ phase: 'failed', error });
+  }, []);
+
+  const failed = state.phase === 'failed';
+  useEffect(() => {
+    // Keyboard users keep their place: the pressed Retry button is gone after a retry.
+    if (failed) headingRef.current?.focus();
+  }, [failed]);
 
   useEffect(() => {
     // StrictMode mounts effects twice; a sign-in must start once.
@@ -84,7 +112,13 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
 
   const t = createTranslator(locale);
 
-  if (state.phase === 'ready') return <>{children(state.me, { t, locale })}</>;
+  if (state.phase === 'ready') {
+    return (
+      <ToastProvider closeLabel={t('toast.close')} regionLabel={t('toast.region')}>
+        {children(state.me, { t, locale, retryAuth, reportAuthFailure })}
+      </ToastProvider>
+    );
+  }
 
   if (state.phase === 'loading') {
     return (
@@ -105,10 +139,12 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
     <main className={styles.screen}>
       <img className={styles.logo} src={logoUrl} alt={t('auth.logoAlt')} />
       <div className={styles.failure} role="alert">
-        <h1 className={styles.title}>{t(failure.title)}</h1>
+        <h1 ref={headingRef} tabIndex={-1} className={styles.title}>
+          {t(failure.title)}
+        </h1>
         <p className={styles.description}>{serverMessage ?? t(failure.description)}</p>
         {failure.retry ? (
-          <Button variant="secondary" onClick={() => void signIn()}>
+          <Button variant="secondary" onClick={retryAuth}>
             {t('auth.retry')}
           </Button>
         ) : null}

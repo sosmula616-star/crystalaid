@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MeResponse } from '@crystalaid/contracts';
 import { ApiError, type ApiClient } from '../api/client.js';
-import { AuthGate } from './AuthGate.js';
+import { AuthGate, type AuthGateContext } from './AuthGate.js';
 import type { Session } from './session.js';
 
 const ME: MeResponse = {
@@ -15,7 +16,14 @@ const ME: MeResponse = {
   permissions: [],
 };
 
-function setup(opts: { start?: () => Promise<void>; me?: () => Promise<MeResponse>; locale?: string } = {}) {
+function setup(
+  opts: {
+    start?: () => Promise<void>;
+    me?: () => Promise<MeResponse>;
+    locale?: string | null;
+    strict?: boolean;
+  } = {},
+) {
   const session: Session = {
     start: vi.fn(opts.start ?? (async () => {})),
     refresh: vi.fn(async () => {}),
@@ -26,12 +34,18 @@ function setup(opts: { start?: () => Promise<void>; me?: () => Promise<MeRespons
     post: vi.fn(),
     patch: vi.fn(),
   } as unknown as ApiClient;
-  render(
-    <AuthGate session={session} api={api} discordLocale={() => opts.locale ?? 'ru'}>
-      {(me) => <p>hello {me.user.username}</p>}
-    </AuthGate>,
+  const context: { current: AuthGateContext | null } = { current: null };
+  const locale = opts.locale === null ? undefined : (opts.locale ?? 'ru');
+  const gate = (
+    <AuthGate session={session} api={api} discordLocale={() => locale}>
+      {(me, ctx) => {
+        context.current = ctx;
+        return <p>hello {me.user.username}</p>;
+      }}
+    </AuthGate>
   );
-  return { session, api };
+  render(opts.strict ? <StrictMode>{gate}</StrictMode> : gate);
+  return { session, api, context };
 }
 
 describe('AuthGate', () => {
@@ -128,5 +142,60 @@ describe('AuthGate', () => {
     setup({ me });
     await userEvent.click(await screen.findByRole('button', { name: 'Повторить' }));
     await waitFor(() => expect(screen.getByText('hello alice')).toBeTruthy());
+  });
+
+  it('starts the sign-in once under StrictMode', async () => {
+    const { session, api } = setup({ strict: true });
+    await screen.findByText('hello alice');
+    expect(session.start).toHaveBeenCalledTimes(1);
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the current locale when Discord reports none', async () => {
+    vi.spyOn(navigator, 'language', 'get').mockReturnValue('ru-RU');
+    setup({
+      locale: null,
+      start: async () => {
+        throw new ApiError('DISCORD_UNAVAILABLE', 'down', 502);
+      },
+    });
+    expect(await screen.findByText('Не удалось подключиться')).toBeTruthy();
+    expect(document.documentElement.lang).toBe('ru');
+  });
+
+  it('moves focus to the heading of a failure screen, also after Retry', async () => {
+    const start = vi.fn<() => Promise<void>>().mockRejectedValue(new ApiError('NETWORK', 'offline', 0));
+    setup({ start });
+    const heading = await screen.findByRole('heading', { name: 'Не удалось подключиться' });
+    expect(document.activeElement).toBe(heading);
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить' }));
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
+    const again = await screen.findByRole('heading', { name: 'Не удалось подключиться' });
+    await waitFor(() => expect(document.activeElement).toBe(again));
+  });
+
+  it('labels the toast region from i18n', async () => {
+    setup();
+    await screen.findByText('hello alice');
+    expect(document.querySelector('[aria-label^=\'Уведомления\']')).toBeTruthy();
+  });
+
+  it('shows the failure screen with Retry when a child reports a failed re-login', async () => {
+    const { context, session } = setup();
+    await screen.findByText('hello alice');
+    act(() => context.current!.reportAuthFailure(new ApiError('DISCORD_UNAVAILABLE', 'down', 502)));
+    expect(await screen.findByText('Не удалось подключиться')).toBeTruthy();
+    expect(screen.queryByText('hello alice')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить' }));
+    expect(await screen.findByText('hello alice')).toBeTruthy();
+    expect(session.start).toHaveBeenCalledTimes(2);
+  });
+
+  it('retryAuth in the context runs the sign-in again', async () => {
+    const { context, session } = setup();
+    await screen.findByText('hello alice');
+    act(() => context.current!.retryAuth());
+    await waitFor(() => expect(session.start).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('hello alice')).toBeTruthy();
   });
 });

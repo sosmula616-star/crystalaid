@@ -33,6 +33,8 @@ export const ru = {
   'auth.unavailable.description': 'Нет связи с сервером или Discord. Проверьте соединение и повторите попытку.',
   'auth.error.title': 'Не удалось войти',
   'auth.error.description': 'Что-то пошло не так. Повторите попытку.',
+  'toast.close': 'Закрыть',
+  'toast.region': 'Уведомления',
 } as const;
 
 export type MessageKey = keyof typeof ru;
