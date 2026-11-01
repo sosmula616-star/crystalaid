@@ -1,9 +1,16 @@
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig({
+const here = fileURLToPath(new URL('.', import.meta.url));
+
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  // Mode-specific values of apps/activity/.env.<mode> (only `mock` has one): the shared
+  // envDir below is the repository root, so these are defined here.
+  define: Object.fromEntries(
+    Object.entries(loadEnv(mode, here, 'VITE_')).map(([key, value]) => [`import.meta.env.${key}`, JSON.stringify(value)]),
+  ),
   // The one .env lives in the repository root, next to the API's.
   envDir: fileURLToPath(new URL('../..', import.meta.url)),
   // Only VITE_* values reach the client bundle. The root .env also holds secrets
@@ -36,4 +43,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

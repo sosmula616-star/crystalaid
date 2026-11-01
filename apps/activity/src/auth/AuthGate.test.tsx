@@ -151,6 +151,24 @@ describe('AuthGate', () => {
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 
+  it('lets a stored language win over the Discord locale, and switches through the context', async () => {
+    localStorage.setItem('crystalaid.locale', 'en');
+    const { context } = setup({ locale: 'ru' });
+    expect(await screen.findByText('hello alice')).toBeTruthy();
+    expect(document.documentElement.lang).toBe('en');
+    act(() => context.current?.setLocale('ru'));
+    expect(document.documentElement.lang).toBe('ru');
+    localStorage.clear();
+  });
+
+  it('ignores a stored language it does not know', async () => {
+    localStorage.setItem('crystalaid.locale', 'xx');
+    setup({ locale: 'en-US' });
+    expect(await screen.findByText('hello alice')).toBeTruthy();
+    expect(document.documentElement.lang).toBe('en');
+    localStorage.clear();
+  });
+
   it('keeps the current locale when Discord reports none', async () => {
     vi.spyOn(navigator, 'language', 'get').mockReturnValue('ru-RU');
     setup({

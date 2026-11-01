@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MeResponse } from '@crystalaid/contracts';
-import { Button, ToastProvider } from '@crystalaid/design-system';
-import { createTranslator, resolveLocale, type Locale, type MessageKey } from '@crystalaid/i18n';
+import { Button, readStored, ToastProvider } from '@crystalaid/design-system';
+import { createTranslator, isLocale, resolveLocale, type Locale, type MessageKey } from '@crystalaid/i18n';
 import { ApiError, type ApiClient } from '../api/client.js';
 import logoUrl from '../assets/logo.png';
 import type { Session } from './session.js';
@@ -12,6 +12,8 @@ type Translate = ReturnType<typeof createTranslator>;
 export interface AuthGateContext {
   t: Translate;
   locale: Locale;
+  /** Switches the language. The caller saves the choice; the stored one wins at the next start. */
+  setLocale(locale: Locale): void;
   /** Runs the sign-in again, as the Retry button does. */
   retryAuth(): void;
   /**
@@ -56,16 +58,25 @@ function describeFailure(error: unknown): Failure {
   }
 }
 
+export const LOCALE_KEY = 'crystalaid.locale';
+
+function storedLocale(): Locale | null {
+  const value = readStored(LOCALE_KEY);
+  return value !== null && isLocale(value) ? value : null;
+}
+
 export function AuthGate({ session, api, discordLocale, children }: AuthGateProps) {
   const [state, setState] = useState<State>({ phase: 'loading' });
-  const [locale, setLocale] = useState<Locale>(() => resolveLocale(navigator.language));
+  const [locale, setLocale] = useState<Locale>(() => storedLocale() ?? resolveLocale(navigator.language));
   const run = useRef(0);
   const started = useRef(false);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  // Without a known Discord locale the current one stays.
+  // The language the person chose in Settings wins over Discord's. Without a
+  // known Discord locale the current one stays.
   const adoptDiscordLocale = useCallback(() => {
+    if (storedLocale()) return;
     const discord = discordLocale?.();
     if (discord) setLocale(resolveLocale(discord));
   }, [discordLocale]);
@@ -115,7 +126,7 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
   if (state.phase === 'ready') {
     return (
       <ToastProvider closeLabel={t('toast.close')} regionLabel={t('toast.region')}>
-        {children(state.me, { t, locale, retryAuth, reportAuthFailure })}
+        {children(state.me, { t, locale, setLocale, retryAuth, reportAuthFailure })}
       </ToastProvider>
     );
   }

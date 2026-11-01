@@ -48,6 +48,17 @@ export const ru = {
   'shell.sectionError.title': 'Не удалось показать раздел',
   'shell.sectionError.description': 'Остальные разделы работают. Повторите попытку.',
   'shell.placeholder.title': 'Раздел появится в следующих версиях',
+  'overview.greeting': 'Здравствуйте, {name}',
+  'overview.level': 'Уровень',
+  'overview.position': 'Должность',
+  'overview.balance': 'Баланс токенов',
+  'overview.later.title': 'Смены и тикеты появятся позже',
+  'overview.later.description': 'Здесь будут ваши смены и тикеты, когда эти разделы будут готовы.',
+  'settings.language': 'Язык',
+  'settings.language.ru': 'Русский',
+  'settings.language.en': 'English',
+  'settings.theme': 'Тема оформления',
+  'settings.theme.locked': 'Откроется в магазине',
 } as const;
 
 export type MessageKey = keyof typeof ru;

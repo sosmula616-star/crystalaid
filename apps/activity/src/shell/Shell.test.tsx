@@ -71,6 +71,17 @@ describe('Shell', () => {
     expect(await screen.findByText('Раздел появится в следующих версиях')).toBeTruthy();
   });
 
+  it('shows the skeleton until the real Overview is ready, then the user from /me', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const sections = SECTIONS.map((s) => (s.id === 'overview' ? { ...s, load: () => gate.then(() => s.load()) } : s));
+    setup({ sections });
+    expect(screen.getByRole('status', { name: 'Раздел загружается' })).toBeTruthy();
+    release();
+    expect(await screen.findByRole('heading', { name: 'Здравствуйте, alice' })).toBeTruthy();
+    expect(screen.queryByRole('status', { name: 'Раздел загружается' })).toBeNull();
+  });
+
   it('moves focus to the section heading when the section changes, and not on first render', async () => {
     const { user } = setup();
     expect(document.activeElement).not.toBe(screen.getByRole('heading', { level: 1 }));
@@ -85,7 +96,7 @@ describe('Shell', () => {
     expect(skip.getAttribute('href')).toBe('#main-content');
     expect(screen.getByRole('main').id).toBe('main-content');
     expect(screen.getByText('alice')).toBeTruthy();
-    expect(screen.getByText('Админ')).toBeTruthy();
+    expect(within(screen.getByRole('banner')).getByText('Админ')).toBeTruthy();
   });
 
   it('shows a side bar with every section at medium and wide widths and no More button', () => {
@@ -135,6 +146,24 @@ describe('Shell', () => {
     const withCounter = (): Section[] =>
       SECTIONS.map((s) => ({ ...s, load: async () => ({ default: s.id === 'shift' ? Counter : Fine }) }));
     const Fine: ComponentType = () => <p>fine</p>;
+
+    it('drops the compact action when the section changes, even if the section forgot to', async () => {
+      const Leaky: ComponentType = () => {
+        const { setCompactAction } = useShell();
+        useEffect(() => setCompactAction({ label: 'Утечка', onSelect: () => {} }), [setCompactAction]);
+        return <p>leaky</p>;
+      };
+      const sections = SECTIONS.map((s) => ({ ...s, load: async () => ({ default: s.id === 'shift' ? Leaky : Fine }) }));
+      const { user } = setup({ sections }, 1400);
+      await user.click(within(navigation()).getByRole('button', { name: 'Смена' }));
+      await screen.findByText('leaky');
+      resizeTo(200);
+      expect(screen.getByRole('button', { name: 'Утечка' })).toBeTruthy();
+      resizeTo(1400);
+      await user.click(within(navigation()).getByRole('button', { name: 'Тикеты' }));
+      resizeTo(200);
+      expect(screen.queryByRole('button', { name: 'Утечка' })).toBeNull();
+    });
 
     it('keeps local state and the active section from wide to compact and back, and shows the section action', async () => {
       const { user } = setup({ sections: withCounter() }, 1400);

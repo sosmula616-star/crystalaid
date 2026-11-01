@@ -10,27 +10,53 @@ import { createDiscordPort } from './auth/discord.js';
 import { createSession } from './auth/session.js';
 
 const THEME_KEY = 'crystalaid.theme';
-applyTheme(readStored(THEME_KEY) ?? 'crystal');
 
-const sdk = createDiscordPort(import.meta.env.VITE_DISCORD_CLIENT_ID);
+async function start() {
+  applyTheme(readStored(THEME_KEY) ?? 'crystal');
+  const root = createRoot(document.getElementById('root')!);
 
-// The client and the session need each other: the client asks the session to
-// refresh, the session logs in through the client.
-const api = createApiClient({
-  getToken: () => session.token(),
-  refresh: () => session.refresh(),
-});
-// A stable function: the shell subscribes in an effect that depends on it.
-const onLayoutMode = (callback: (mode: number) => void) => sdk.onLayoutMode(callback);
-const session = createSession({
-  sdk,
-  login: (code, instanceId) => api.post('/auth/activity', { code, instanceId }, ActivityAuthResponse),
-});
+  // Dev only: the showcase. The DEV check lets the bundler drop the import from production.
+  if (import.meta.env.DEV && location.pathname === '/kit') {
+    const { Kit } = await import('./dev/Kit.js');
+    root.render(
+      <StrictMode>
+        <TooltipProvider>
+          <Kit />
+        </TooltipProvider>
+      </StrictMode>,
+    );
+    return;
+  }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <TooltipProvider>
-      <App session={session} api={api} discordLocale={() => sdk.locale} onLayoutMode={onLayoutMode} />
-    </TooltipProvider>
-  </StrictMode>,
-);
+  // Dev only: a fake Discord SDK and API (see `pnpm dev:mock`).
+  const mock =
+    import.meta.env.DEV && import.meta.env.VITE_DEV_MOCK === '1'
+      ? (await import('./dev/mock.js')).createMock(new URLSearchParams(location.search))
+      : null;
+
+  const sdk = mock?.sdk ?? createDiscordPort(import.meta.env.VITE_DISCORD_CLIENT_ID);
+
+  // The client and the session need each other: the client asks the session to
+  // refresh, the session logs in through the client.
+  const api = createApiClient({
+    getToken: () => session.token(),
+    refresh: () => session.refresh(),
+    ...(mock ? { fetch: mock.fetch } : {}),
+  });
+  // A stable function: the shell subscribes in an effect that depends on it.
+  const onLayoutMode = (callback: (mode: number) => void) => sdk.onLayoutMode(callback);
+  const session = createSession({
+    sdk,
+    login: (code, instanceId) => api.post('/auth/activity', { code, instanceId }, ActivityAuthResponse),
+  });
+
+  root.render(
+    <StrictMode>
+      <TooltipProvider>
+        <App session={session} api={api} discordLocale={() => sdk.locale} onLayoutMode={onLayoutMode} />
+      </TooltipProvider>
+    </StrictMode>,
+  );
+}
+
+void start();

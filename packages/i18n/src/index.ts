@@ -6,6 +6,10 @@ export type { MessageKey };
 
 const CATALOGS: Record<Locale, Record<MessageKey, string>> = { ru, en };
 
+export function isLocale(value: string): value is Locale {
+  return value === 'ru' || value === 'en';
+}
+
 export function resolveLocale(discordLocale?: string): Locale {
   const language = discordLocale?.toLowerCase().split(/[-_]/)[0];
   return language === 'ru' ? 'ru' : 'en';

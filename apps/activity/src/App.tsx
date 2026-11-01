@@ -13,10 +13,12 @@ export interface AppProps {
 export function App({ session, api, discordLocale, onLayoutMode }: AppProps) {
   return (
     <AuthGate session={session} api={api} {...(discordLocale ? { discordLocale } : {})}>
-      {(me, { t, retryAuth, reportAuthFailure }) => (
+      {(me, { t, locale, setLocale, retryAuth, reportAuthFailure }) => (
         <Shell
           me={me}
           t={t}
+          locale={locale}
+          onLocaleChange={setLocale}
           onRetryAuth={retryAuth}
           reportAuthFailure={reportAuthFailure}
           onLayoutMode={onLayoutMode}

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type LazyExoticComponent } from 'react';
 import { Button, Skeleton } from '@crystalaid/design-system';
 import type { MeResponse } from '@crystalaid/contracts';
+import type { Locale } from '@crystalaid/i18n';
 import { BottomNav } from './BottomNav.js';
 import { ShellContext, type CompactAction, type Translate } from './context.js';
 import { isAuthError, SectionBoundary } from './SectionBoundary.js';
@@ -13,6 +14,9 @@ import styles from './Shell.module.css';
 export interface ShellProps {
   me: MeResponse;
   t: Translate;
+  /** The active language and the way to change it. Default: Russian, no change. */
+  locale?: Locale;
+  onLocaleChange?: (locale: Locale) => void;
   /** Runs the sign-in again; the retry action of an auth error that stays on screen. */
   onRetryAuth: () => void;
   /** An auth error reached a section: the gate replaces the panel with its failure screen. */
@@ -85,7 +89,9 @@ function SectionView({ section, t, onRetryAuth, reportAuthFailure }: SectionView
   );
 }
 
-export function Shell({ me, t, onRetryAuth, reportAuthFailure, onLayoutMode, sections = SECTIONS }: ShellProps) {
+const noLocaleChange = () => {};
+
+export function Shell({ me, t, locale = 'ru', onLocaleChange = noLocaleChange, onRetryAuth, reportAuthFailure, onLayoutMode, sections = SECTIONS }: ShellProps) {
   const [activeId, setActiveId] = useState<SectionId>(FIRST_SECTION);
   const [discordMode, setDiscordMode] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -114,10 +120,18 @@ export function Shell({ me, t, onRetryAuth, reportAuthFailure, onLayoutMode, sec
   }, [active?.id]);
 
   const [compactAction, setCompactAction] = useState<CompactAction | null>(null);
-  const context = useMemo(() => ({ me, t, setCompactAction }), [me, t]);
+  const context = useMemo(
+    () => ({ me, t, locale, setLocale: onLocaleChange, setCompactAction }),
+    [me, t, locale, onLocaleChange],
+  );
+  // A compact action belongs to the section that set it; the new section sets its own.
+  const selectSection = useCallback((id: SectionId) => {
+    setCompactAction(null);
+    setActiveId(id);
+  }, []);
   const focusHeading = useCallback(() => headingRef.current?.focus(), []);
   const compact = mode === 'compact';
-  const nav = { sections: available, activeId: active?.id ?? FIRST_SECTION, onSelect: setActiveId, t };
+  const nav = { sections: available, activeId: active?.id ?? FIRST_SECTION, onSelect: selectSection, t };
   const title = active ? t(active.labelKey) : '';
 
   return (

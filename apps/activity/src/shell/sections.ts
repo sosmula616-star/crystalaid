@@ -56,17 +56,17 @@ const RANK: Record<Level, number> = { NONE: 0, SUPPORT: 1, CURATOR: 2, ADMIN: 3 
 /** Navigation groups, in display order. A section belongs to the group of its `minLevel`. */
 export const GROUPS = ['SUPPORT', 'CURATOR', 'ADMIN'] as const satisfies readonly Section['minLevel'][];
 
-// Every section loads the placeholder for now; the real ones replace their `load`.
+// Sections without a screen yet load the placeholder; the real ones replace their `load`.
 const placeholder = () => import('../sections/Placeholder.js');
 
 /** Spec table 4.3. The order here is the order of the navigation. */
 export const SECTIONS: readonly Section[] = [
-  { id: 'overview', labelKey: 'nav.overview', icon: LayoutDashboard, minLevel: 'SUPPORT', load: placeholder },
+  { id: 'overview', labelKey: 'nav.overview', icon: LayoutDashboard, minLevel: 'SUPPORT', load: () => import('../sections/Overview.js') },
   { id: 'shift', labelKey: 'nav.shift', icon: Clock, minLevel: 'SUPPORT', load: placeholder },
   { id: 'tickets', labelKey: 'nav.tickets', icon: Ticket, minLevel: 'SUPPORT', load: placeholder },
   { id: 'stats', labelKey: 'nav.stats', icon: ChartColumn, minLevel: 'SUPPORT', load: placeholder },
   { id: 'shop', labelKey: 'nav.store', icon: ShoppingBag, minLevel: 'SUPPORT', load: placeholder },
-  { id: 'settings', labelKey: 'nav.settings', icon: Settings, minLevel: 'SUPPORT', load: placeholder },
+  { id: 'settings', labelKey: 'nav.settings', icon: Settings, minLevel: 'SUPPORT', load: () => import('../sections/Settings.js') },
   { id: 'staff', labelKey: 'nav.roster', icon: Users, minLevel: 'CURATOR', load: placeholder },
   { id: 'staffShifts', labelKey: 'nav.rosterShifts', icon: CalendarClock, minLevel: 'CURATOR', load: placeholder },
   {

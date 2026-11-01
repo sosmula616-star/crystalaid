@@ -6,6 +6,8 @@ coverage/
 .env
 .env.*
 !.env.example
+# Holds only the dev-mock switch, no secret.
+!apps/activity/.env.mock
 
 .superpowers/
 
