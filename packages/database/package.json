@@ -1,0 +1,27 @@
+{
+  "name": "@crystalaid/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "migrate:test": "tsx src/migrate.ts --test"
+  },
+  "dependencies": {
+    "@crystalaid/contracts": "workspace:*",
+    "@crystalaid/domain": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "pg": "^8.23.1",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11"
+  }
+}

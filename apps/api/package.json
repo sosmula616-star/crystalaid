@@ -1,0 +1,23 @@
+{
+  "name": "@crystalaid/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "api": "tsx src/main.ts api",
+    "worker": "tsx src/main.ts worker"
+  },
+  "dependencies": {
+    "@crystalaid/config": "workspace:*",
+    "@crystalaid/contracts": "workspace:*",
+    "@crystalaid/database": "workspace:*",
+    "@crystalaid/domain": "workspace:*",
+    "@fastify/rate-limit": "^11.2.1",
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.12.7",
+    "ioredis": "^5.10.0",
+    "jose": "^6.2.14",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.7"
+  }
+}

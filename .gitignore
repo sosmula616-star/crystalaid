@@ -8,3 +8,5 @@ coverage/
 !.env.example
 
 .superpowers/
+
+crystalaid.config.json

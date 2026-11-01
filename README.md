@@ -4,12 +4,32 @@
 
 # CrystalAid
 
-Discord-бот и Discord Activity, которые превращают активность на сервере в прогресс: XP, уровни, серии, награды, рейтинг и косметику.
+Discord-бот и Discord Activity для учёта ветки стаффа: тикеты, смены и нормы, онлайн, кадры, отчёты, зарплата в токенах и внутренний магазин.
 
-Проект в разработке, рабочего кода пока нет.
+Проект в разработке. Готово ядро: HTTP API, вход через Activity, уровни и права, синхронизация состава из событий Discord, журнал аудита. Бота и Activity пока нет.
 
-- [Спецификация](docs/superpowers/specs/2026-11-01-discord-activity-platform-design.md)
-- [План ядра](docs/superpowers/plans/2026-11-01-core-platform.md)
+## Запуск
+
+Нужны PostgreSQL, Redis 5+ с паролем, `.env` в корне (образец `.env.example`) и `crystalaid.config.json` (образец `crystalaid.config.example.json`). API, worker и `pnpm db:migrate` читают корневой `.env` сами; переменные из настоящего окружения сильнее файла. Локальные PostgreSQL и Redis поднимает `docker compose up -d` (пароли `POSTGRES_PASSWORD` и `REDIS_PASSWORD` берутся из `.env`, порты открыты только на `127.0.0.1`).
+
+```
+pnpm install --frozen-lockfile
+pnpm db:migrate
+pnpm --dir apps/api run api
+pnpm --dir apps/api run worker
+```
+
+Сборка не нужна: сервисы запускаются через tsx. Тесты: `pnpm test` (из корня).
+
+## Документация
+
+- [Спецификация](docs/superpowers/specs/2026-11-01-crystalaid-staff-design.md)
+- [Архитектура](docs/architecture.md)
+- [API](docs/api.md)
+- [База данных](docs/database.md)
+- [Безопасность](docs/security.md)
+- [Тесты](docs/testing.md)
+- [Развёртывание](docs/deployment.md)
 
 ## Брендинг
 

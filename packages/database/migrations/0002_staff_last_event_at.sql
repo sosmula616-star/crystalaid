@@ -1,0 +1,1 @@
+ALTER TABLE "staff_members" ADD COLUMN "last_event_at" timestamp with time zone;
