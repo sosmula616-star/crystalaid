@@ -53,8 +53,8 @@ describe('static Activity', () => {
       expect(res.headers['content-type']).toContain('text/html');
       expect(res.headers['cache-control']).toBe('no-cache');
       const html = res.body;
-      expect(html).toContain(`window.__CRYSTALAID_CLIENT_ID__="${CLIENT}"`);
-      expect(html.indexOf('__CRYSTALAID_CLIENT_ID__')).toBeLessThan(html.indexOf('type="module"'));
+      expect(html).toContain(`<meta name="crystalaid-client-id" content="${CLIENT}">`);
+      expect(html).not.toContain('<script>');
     }));
 
   it('serves hashed assets with content type and a long cache', () =>
@@ -151,9 +151,9 @@ describe('static Activity', () => {
 });
 
 describe('injectClientId', () => {
-  it('escapes anything that could end the script', () => {
-    const html = injectClientId('<head></head>', '</script><b>"');
-    expect(html).not.toContain('</script><b>');
-    expect(html).toContain('\\u003c/script>');
+  it('escapes anything that could leave the attribute', () => {
+    const html = injectClientId('<head></head>', '"><b>&');
+    expect(html).not.toContain('"><b>');
+    expect(html).toContain('content="&quot;&gt;&lt;b&gt;&amp;"');
   });
 });

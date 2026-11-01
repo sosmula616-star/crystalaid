@@ -1,8 +1,6 @@
-declare global {
-  interface Window {
-    /** Set by the API in index.html from DISCORD_CLIENT_ID (see apps/api/src/http/static.ts). */
-    __CRYSTALAID_CLIENT_ID__?: string;
-  }
+function metaClientId(): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  return document.querySelector('meta[name="crystalaid-client-id"]')?.getAttribute('content') ?? undefined;
 }
 
 /**
@@ -10,7 +8,7 @@ declare global {
  * for any deployment; the build-time VITE_DISCORD_CLIENT_ID is the fallback for the dev server.
  */
 export function readClientId(
-  runtime: string | undefined = typeof window === 'undefined' ? undefined : window.__CRYSTALAID_CLIENT_ID__,
+  runtime: string | undefined = metaClientId(),
   buildTime: string | undefined = import.meta.env.VITE_DISCORD_CLIENT_ID,
 ): string {
   return runtime?.trim() || buildTime?.trim() || '';

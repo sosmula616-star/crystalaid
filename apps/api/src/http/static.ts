@@ -6,7 +6,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 export interface StaticOptions {
   /** The built Activity (`apps/activity/dist`). */
   dir: string;
-  /** Discord application id, put into index.html as `window.__CRYSTALAID_CLIENT_ID__`. */
+  /** Discord application id, put into index.html as a `crystalaid-client-id` meta tag. */
   clientId: string;
 }
 
@@ -35,19 +35,17 @@ const TYPES: Record<string, string> = {
 const IMMUTABLE_PREFIX = '/assets/';
 const API_PREFIX = '/api';
 
-/** `<`, U+2028 and U+2029 are escaped so no value can end the script element or the string. */
-function jsString(value: string): string {
-  return JSON.stringify(value)
-    .replaceAll('<', '\\u003c')
-    .replaceAll(String.fromCharCode(0x2028), '\\u2028')
-    .replaceAll(String.fromCharCode(0x2029), '\\u2029');
+function escapeAttribute(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
-/** Puts the client id script ahead of every other script in the page. */
+/** Uses a meta tag, not an inline script, so that a strict CSP inside Discord cannot block it. */
 export function injectClientId(html: string, clientId: string): string {
-  const tag = `<script>window.__CRYSTALAID_CLIENT_ID__=${jsString(clientId)};</script>`;
-  const at = html.search(/<script[\s>]/i);
-  if (at >= 0) return html.slice(0, at) + tag + html.slice(at);
+  const tag = `<meta name="crystalaid-client-id" content="${escapeAttribute(clientId)}">`;
   const head = html.search(/<\/head>/i);
   return head >= 0 ? html.slice(0, head) + tag + html.slice(head) : tag + html;
 }
