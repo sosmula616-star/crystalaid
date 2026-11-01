@@ -89,7 +89,7 @@
 
 /* The label keeps its space, so the button does not change width. */
 .loading .label {
-  visibility: hidden;
+  opacity: 0;
 }
 
 .spinner {
@@ -102,7 +102,7 @@
   border: 2px solid currentColor;
   border-right-color: transparent;
   border-radius: 50%;
-  animation: spin 700ms linear infinite;
+  animation: spin var(--motion-spin) linear infinite;
 }
 
 @keyframes spin {

@@ -21,9 +21,45 @@ describe('Button', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('keeps its label while loading so the width does not change', () => {
+  it('keeps its accessible name while loading', () => {
     render(<Button loading>Save</Button>);
-    expect(screen.getByRole('button').textContent).toBe('Save');
+    expect(screen.getByRole('button', { name: 'Save' }).textContent).toBe('Save');
+  });
+
+  it.each([
+    ['loading', { loading: true }],
+    ['disabled', { disabled: true }],
+  ])('ignores Enter and Space when %s', async (_name, props) => {
+    const onClick = vi.fn();
+    render(<Button {...props} onClick={onClick}>Save</Button>);
+    const button = screen.getByRole('button');
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard(' ');
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('activates with Enter and Space when idle', async () => {
+    const onClick = vi.fn();
+    render(<Button onClick={onClick}>Save</Button>);
+    screen.getByRole('button').focus();
+    await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard(' ');
+    expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not submit its form while loading, but does when idle', async () => {
+    const onSubmit = vi.fn((e: { preventDefault: () => void }) => e.preventDefault());
+    const { rerender } = render(
+      <form onSubmit={onSubmit}><Button type="submit" loading>Save</Button></form>,
+    );
+    await userEvent.click(screen.getByRole('button'));
+    screen.getByRole('button').focus();
+    await userEvent.keyboard('{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+    rerender(<form onSubmit={onSubmit}><Button type="submit">Save</Button></form>);
+    await userEvent.click(screen.getByRole('button'));
+    expect(onSubmit).toHaveBeenCalledOnce();
   });
 
   it('does not call the handler when disabled', async () => {

@@ -33,6 +33,8 @@
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-slow: 240ms;
+  --motion-spin: 700ms;
+  --motion-shimmer: 1400ms;
 
   --touch-target: 40px;
 
@@ -44,11 +46,14 @@
     --motion-fast: 0ms;
     --motion-base: 0ms;
     --motion-slow: 0ms;
+    --motion-spin: 0ms;
+    --motion-shimmer: 0ms;
   }
 
   *,
   *::before,
   *::after {
+    animation: none !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

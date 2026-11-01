@@ -37,6 +37,14 @@ describe('Avatar', () => {
     expect(document.querySelector('img')?.getAttribute('src')).toBe('/ok.png');
   });
 
+  it('is hidden from assistive tech when the name is empty', () => {
+    const { container } = render(<Avatar name="" />);
+    const el = container.firstElementChild!;
+    expect(el.getAttribute('aria-hidden')).toBe('true');
+    expect(el.hasAttribute('aria-label')).toBe(false);
+    expect(el.hasAttribute('role')).toBe(false);
+  });
+
   it('has no a11y violations', async () => {
     const { container } = render(<><Avatar name="Ada Lovelace" /><Avatar name="Bo" src="/b.png" /></>);
     await expectNoA11yViolations(container);

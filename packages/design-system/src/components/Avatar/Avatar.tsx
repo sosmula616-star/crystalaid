@@ -20,8 +20,10 @@ export function Avatar({ name, src, className, ...rest }: AvatarProps) {
   // Remember which src failed, so a new src gets another try.
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const showImage = Boolean(src) && src !== failedSrc;
+  // Without a name the avatar carries no information, so it is hidden from assistive tech.
+  const a11y = name.trim() ? { role: 'img', 'aria-label': name } : { 'aria-hidden': true };
   return (
-    <span {...rest} role="img" aria-label={name} className={[styles.avatar, className].filter(Boolean).join(' ')}>
+    <span {...rest} {...a11y} className={[styles.avatar, className].filter(Boolean).join(' ')}>
       {showImage ? (
         <img className={styles.image} src={src!} alt="" onError={() => setFailedSrc(src ?? null)} />
       ) : (
