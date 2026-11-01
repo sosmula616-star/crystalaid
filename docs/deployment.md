@@ -58,7 +58,7 @@ Redis это граница доверия. Любой, кто может пис
 Activity это статические файлы, сервера у неё нет.
 
 1. Задать `VITE_DISCORD_CLIENT_ID` (идентификатор приложения Discord, тот же, что `DISCORD_CLIENT_ID`). Значение вшивается в сборку: его читают при сборке из корневого `.env` или из окружения, после сборки сменить нельзя. Из `.env` в клиент попадают только переменные с префиксом `VITE_`; секреты (`DISCORD_CLIENT_SECRET`, `JWT_SECRET`) туда не попадают.
-2. Собрать: `pnpm --dir apps/activity run build` (проверка типов и `vite build`). Результат в `apps/activity/dist`: `index.html` и `assets/`. Шрифт и значки лежат внутри, внешних адресов нет, кроме доменов Discord из SDK.
+2. Собрать: `pnpm --dir apps/activity run build` (проверка типов и `vite build`). Результат в `apps/activity/dist`: `index.html` и `assets/`. Шрифт и значки лежат внутри, внешних запросов нет, кроме доменов Discord из SDK (в файлах есть ещё строки библиотек: `www.w3.org`, `json-schema.org`, `react.dev`, `github.com`, `localhost`, они не запрашиваются).
 3. Разместить `dist` на любом статическом хостинге с HTTPS. Для кэша хватит значения по умолчанию: имена файлов в `assets/` содержат хэш, `index.html` кэшировать не нужно.
 4. В портале разработчиков Discord, раздел Activities, URL Mappings:
 

@@ -61,7 +61,7 @@ interface Wide {
 }
 
 const WIDE_ROWS: Wide[] = [
-  { id: 'w1', name: 'Konstantina-Aleksandrovna-Wilhelmina', note: 'x'.repeat(40), amount: 1000000000 },
+  { id: 'w1', name: 'Konstantina-Aleksandrovna-Wilhelmina-Ros', note: 'x'.repeat(40), amount: 1000000000 },
 ];
 
 function ToastButton() {

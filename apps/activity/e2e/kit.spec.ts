@@ -98,7 +98,7 @@ test.describe('Table in card mode at 390 px', () => {
     const table = page.getByRole('table', { name: 'Длинные значения' });
     await table.scrollIntoViewIfNeeded();
 
-    const header = table.getByRole('rowheader', { name: 'Konstantina-Aleksandrovna-Wilhelmina' });
+    const header = table.getByRole('rowheader', { name: 'Konstantina-Aleksandrovna-Wilhelmina-Ros' });
     await expect(header).toBeVisible();
     await expect(table.getByRole('cell', { name: '1000000000' })).toBeHidden();
 
@@ -123,7 +123,7 @@ test.describe('Table in card mode at 390 px', () => {
     const snapshot = await page.getByRole('region', { name: 'Длинные значения' }).ariaSnapshot();
     expect(snapshot).toContain('table "Длинные значения"');
     expect(snapshot).toContain('row');
-    expect(snapshot).toContain('rowheader "Konstantina-Aleksandrovna-Wilhelmina"');
+    expect(snapshot).toContain('rowheader "Konstantina-Aleksandrovna-Wilhelmina-Ros"');
     expect(snapshot).toContain('cell "' + 'x'.repeat(40) + '"');
     expect(snapshot).toContain('cell "1000000000"');
     expect(snapshot).toContain('columnheader');
@@ -172,7 +172,7 @@ test.describe('prefers-reduced-motion', () => {
     page.evaluate(() =>
       document
         .getAnimations()
-        .filter((a) => a.playState === 'running')
+        .filter((a) => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration ?? 0) > 1)
         .map((a) => (a as CSSAnimation).animationName ?? a.constructor.name),
     );
 

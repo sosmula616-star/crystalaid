@@ -1,7 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
-import { LEVELS, SIZES, expectInsideWindow, expectNoHorizontalScroll, openApp, trackConsole } from './helpers.js';
+import {
+  LEVELS,
+  LONG_NAME,
+  SIZES,
+  expectInsideWindow,
+  expectNoHorizontalScroll,
+  openApp,
+  trackConsole,
+  waitForSection,
+} from './helpers.js';
 
-const LONG_NAME = 'Konstantina Aleksandrovna Wilhelmina-Ros';
 const NAV = 'Основная навигация';
 
 /** Presses a section button through whatever navigation the width shows. */
@@ -21,6 +29,7 @@ async function goTo(page: Page, width: number, label: string) {
     await page.getByRole('navigation', { name: NAV }).getByRole('button', { name: label, exact: true }).click();
   }
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(label);
+  await waitForSection(page);
 }
 
 async function checkSize(page: Page, level: (typeof LEVELS)[number], width: number, height: number, name?: 'long') {
@@ -64,19 +73,52 @@ for (const [width, height] of [
     const errors = trackConsole(page);
     await page.setViewportSize({ width, height });
     await openApp(page, 'level=ADMIN&name=long');
+    const fontSizes = () =>
+      page.evaluate(() => {
+        const px = (el: Element | null) => parseFloat(getComputedStyle(el!).fontSize);
+        return {
+          body: px(document.body),
+          h1: px(document.querySelector('h1')),
+          greeting: px(document.querySelector('main h2')),
+        };
+      });
+    const before = await fontSizes();
     await page.evaluate(() => {
       document.documentElement.style.fontSize = '200%';
     });
+    // The test is only meaningful when the text really doubled (type tokens are rem).
+    const after = await fontSizes();
+    expect(after.body / before.body).toBeCloseTo(2, 2);
+    expect(after.h1 / before.h1).toBeGreaterThan(1.7);
+    // The fluid heading token has a vw part that does not scale, so it grows a little less than 2x.
+    expect(after.greeting / before.greeting).toBeGreaterThan(1.5);
+
+    // Overview at 200%.
     await expectNoHorizontalScroll(page);
+    await expectInsideWindow(page, 'header');
+    await expectInsideWindow(page, 'nav');
+    await expect(page.locator('main h2').first()).toBeVisible();
     await goTo(page, width, 'Журнал');
+    await expectNoHorizontalScroll(page);
+
+    // Settings at 200% with the language select open.
     await goTo(page, width, 'Настройки');
     await expectNoHorizontalScroll(page);
-    // The language select is on screen and can be pressed.
     const select = page.getByRole('combobox').first();
     await select.scrollIntoViewIfNeeded();
     await select.click();
-    await expect(page.getByRole('listbox')).toBeVisible();
-    await page.keyboard.press('Escape');
+    const list = page.getByRole('listbox');
+    await expect(list).toBeVisible();
+    await expectInsideWindow(page, '[role="listbox"]');
+    for (const option of await page.getByRole('option').all()) {
+      const box = (await option.boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(height);
+    }
+    await expectNoHorizontalScroll(page);
+    await page.getByRole('option', { name: 'English' }).click();
+    await expect(select).toHaveText('English');
+    await expectNoHorizontalScroll(page);
     expect(errors).toEqual([]);
   });
 }
@@ -89,7 +131,7 @@ for (const [width, height] of [
   test(`200% page zoom (${width / 2}x${height / 2} CSS px)`, async ({ page }) => {
     const errors = trackConsole(page);
     await page.setViewportSize({ width: width / 2, height: height / 2 });
-    await openApp(page, 'level=ADMIN&name=long');
+    await openApp(page, 'level=ADMIN&name=long', { compact: width / 2 < 320 });
     await expectNoHorizontalScroll(page);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Обзор');
     // Below 320 px the shell is compact: the title only, readable and without sideways scroll.
@@ -109,11 +151,13 @@ test('resizing 1280 -> 390 -> 1280 keeps the current section', async ({ page }) 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'Ещё' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Настройки');
+  await waitForSection(page);
   await expectNoHorizontalScroll(page);
 
   await page.setViewportSize({ width: 1280, height: 720 });
   await expect(page.getByRole('button', { name: 'Ещё' })).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Настройки');
+  await waitForSection(page);
   await expect(
     page.getByRole('navigation', { name: NAV }).getByRole('button', { name: 'Настройки', exact: true }),
   ).toHaveAttribute('aria-current', 'page');
@@ -138,12 +182,13 @@ test('Discord picture-in-picture event turns the compact view on and off', async
   await layout(0);
   await expect(nav).toBeVisible();
   await expect(page.locator('header')).toBeVisible();
+  await waitForSection(page);
   expect(errors).toEqual([]);
 });
 
 test('PIP at start via ?pip=1 shows the compact view', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await openApp(page, 'level=SUPPORT&pip=1');
+  await openApp(page, 'level=SUPPORT&pip=1', { compact: true });
   await expect(page.getByRole('navigation', { name: NAV })).toHaveCount(0);
 });
 
@@ -169,6 +214,7 @@ test('a failed section chunk can be retried', async ({ page }) => {
   blocked = false;
   await page.getByRole('button', { name: 'Повторить' }).click();
   await expect(page.getByText('Не удалось показать раздел')).toHaveCount(0);
+  await waitForSection(page);
   await expect(page.getByRole('combobox').first()).toBeVisible();
   expect(errors).toEqual([]);
 });

@@ -23,7 +23,11 @@ export const SIZES: ReadonlyArray<readonly [number, number]> = [
   [3440, 1440],
 ];
 
-export const LEVELS = ['SUPPORT', 'ADMIN'] as const;
+/** The spec's 40-character name. */
+export const LONG_NAME = 'Konstantina Aleksandrovna Wilhelmina-Ros';
+if (LONG_NAME.length !== 40) throw new Error('LONG_NAME must be 40 characters');
+
+export const LEVELS =['SUPPORT', 'ADMIN'] as const;
 
 /** Console errors and uncaught page errors, collected until the test ends. */
 export function trackConsole(page: Page, ignore: RegExp[] = []): string[] {
@@ -68,9 +72,20 @@ export async function expectInsideWindow(page: Page, selector: string): Promise<
   expect(outside, `outside the window in ${selector}`).toEqual([]);
 }
 
-export async function openApp(page: Page, query: string): Promise<void> {
+/**
+ * Waits until the section shows its real content: the loading indicator is gone and the
+ * main area holds a heading, a field or text. A size check on a skeleton proves nothing.
+ */
+export async function waitForSection(page: Page): Promise<void> {
+  await expect(page.getByRole('status', { name: 'Раздел загружается' })).toHaveCount(0);
+  await expect(page.locator('main#main-content').locator('h2, [role="combobox"], p').first()).toBeVisible();
+}
+
+/** Opens the app and, unless the view is compact, waits for the first section's content. */
+export async function openApp(page: Page, query: string, options: { compact?: boolean } = {}): Promise<void> {
   await page.goto(`/?${query}`);
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  if (!options.compact) await waitForSection(page);
 }
 
 /** Runs axe-core (injected from the installed package) on the page, contrast included. */

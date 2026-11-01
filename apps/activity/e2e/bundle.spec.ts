@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,12 +25,39 @@ const ALLOWED_HOST = [
   /^\[/, // IPv6 pattern text
 ];
 
+/** Strings that exist only in dev code: the showcase, the dev mock and the dev switch. */
+const DEV_MARKERS = [
+  '/kit',
+  'createMock',
+  '__crystalaidLayout',
+  'mock-session-token',
+  'mock-instance',
+  'VITE_DEV_MOCK',
+  'Витрина CrystalAid',
+];
+
+const markersIn = (text: string) => DEV_MARKERS.filter((marker) => text.includes(marker));
+
+test('the marker scan finds a dev marker (positive control)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'crystalaid-control-'));
+  try {
+    const sample = join(dir, 'sample.js');
+    writeFileSync(sample, 'const t = "mock-session-token";');
+    expect(markersIn(readFileSync(sample, 'utf8'))).toEqual(['mock-session-token']);
+    expect(markersIn('const clean = 1;')).toEqual([]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('production build holds no kit, no dev mock, no outside addresses', async () => {
   test.setTimeout(120_000);
   const out = mkdtempSync(join(tmpdir(), 'crystalaid-dist-'));
+  const previousEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
   try {
     const { build } = await import('vite');
-    await build({ root: appDir, logLevel: 'silent', build: { outDir: out, emptyOutDir: true } });
+    await build({ root: appDir, mode: 'production', logLevel: 'silent', build: { outDir: out, emptyOutDir: true } });
 
     const textFiles = [...files(out)].filter((f) => /\.(js|css|html|map|json|svg)$/.test(f));
     expect(textFiles.length).toBeGreaterThan(0);
@@ -38,17 +65,9 @@ test('production build holds no kit, no dev mock, no outside addresses', async (
     for (const file of textFiles) {
       const text = readFileSync(file, 'utf8');
       const name = file.slice(out.length + 1);
-      for (const marker of [
-        '/kit',
-        'createMock',
-        '__crystalaidLayout',
-        'mock-session-token',
-        'mock-instance',
-        'VITE_DEV_MOCK',
-        'Витрина CrystalAid',
-      ]) {
-        expect(text.includes(marker), `${name} contains "${marker}"`).toBe(false);
-      }
+      // import.meta.env.DEV was false: the dev-only code is gone, and no marker of it is left.
+      expect(markersIn(text), `${name} holds dev-only markers`).toEqual([]);
+      expect(text, `${name} keeps a DEV check`).not.toContain('import.meta.env');
       for (const match of text.matchAll(/https?:\/\/([A-Za-z0-9.[\]-]+)/g)) {
         const host = match[1]!;
         if (!ALLOWED_HOST.some((pattern) => pattern.test(host))) foreign.push(`${name}: ${match[0]}`);
@@ -60,6 +79,8 @@ test('production build holds no kit, no dev mock, no outside addresses', async (
     }
     expect(foreign).toEqual([]);
   } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
     rmSync(out, { recursive: true, force: true });
   }
 });
