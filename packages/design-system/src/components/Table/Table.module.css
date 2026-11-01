@@ -1,4 +1,5 @@
 .root {
+  position: relative;
   container-type: inline-size;
   min-width: 0;
   max-width: 100%;
@@ -52,14 +53,15 @@
   border-bottom: 0;
 }
 
+/* Wide containers render no toggle column (header and cells hidden). */
 .toggleCell {
+  display: none;
   width: var(--touch-target);
   padding-block: var(--space-1);
 }
 
-/* Hidden (and out of the accessibility tree) on wide containers. */
 .toggle {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: var(--touch-target);
@@ -175,22 +177,15 @@
     content: none;
   }
 
-  .td[data-priority='secondary'] {
+  .td.collapsed {
     display: none;
   }
 
-  .row[data-expanded='true'] .td[data-priority='secondary'] {
+  td.toggleCell {
     display: block;
-  }
-
-  .toggleCell {
     grid-row: 1;
     grid-column: 2;
     width: auto;
     padding: 0;
-  }
-
-  .toggle {
-    display: inline-flex;
   }
 }

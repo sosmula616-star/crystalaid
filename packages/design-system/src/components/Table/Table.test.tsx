@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { expectNoA11yViolations } from '../../testing.js';
 import { Table, type TableColumn } from './Table.js';
 
@@ -49,7 +49,7 @@ describe('Table', () => {
   it('shows empty content when there are no rows', () => {
     setup([]);
     expect(screen.getByText('Nothing here')).toBeTruthy();
-    expect(screen.getAllByRole('row')).toHaveLength(1);
+    expect(screen.queryByRole('table')).toBeNull();
   });
 
   it('expands a row and reports aria-expanded', async () => {
@@ -66,6 +66,50 @@ describe('Table', () => {
     expect(within(row).getByText('first note')).toBe(controlled);
     await userEvent.click(first!);
     expect(first!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('marks collapsed secondary cells and unmarks them when expanded', async () => {
+    setup();
+    const note = screen.getByText('first note');
+    expect(note.className).toContain('collapsed');
+    expect(screen.getByText('1').className).not.toContain('collapsed');
+    await userEvent.click(screen.getAllByRole('button')[0]!);
+    expect(note.className).not.toContain('collapsed');
+    expect(screen.getByText('second note').className).toContain('collapsed');
+  });
+
+  it('aria-controls only references ids that exist, even for awkward keys and column ids', () => {
+    const cols: TableColumn<Row>[] = [
+      { id: 'h', header: 'Name', render: (r) => r.name, priority: 'primary' },
+      { id: 'a b', header: 'Note', render: (r) => r.note, priority: 'secondary' },
+      { id: 'h', header: 'Extra', render: (r) => r.amount, priority: 'secondary' },
+    ];
+    render(
+      <Table columns={cols} rows={[{ id: 'k 1', name: 'A', note: 'n', amount: 1 }, { id: 'k 2', name: 'B', note: 'm', amount: 2 }]}
+        rowKey={(x) => x.id} empty="-" caption="c" expandLabel="More" />,
+    );
+    for (const button of screen.getAllByRole('button')) {
+      const ids = button.getAttribute('aria-controls')!.split(/\s+/);
+      expect(ids).toHaveLength(2);
+      for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
+      expect(new Set(ids).size).toBe(2);
+    }
+  });
+
+  it('throws when no column is primary', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() =>
+      render(
+        <Table columns={[{ ...columns[2]! }]} rows={rows} rowKey={(x) => x.id} empty="-" caption="c" expandLabel="m" />,
+      ),
+    ).toThrow(/primary/);
+    spy.mockRestore();
+  });
+
+  it('makes the scroller a focusable labelled region', () => {
+    setup();
+    const region = screen.getByRole('region', { name: 'People' });
+    expect(region.getAttribute('tabindex')).toBe('0');
   });
 
   it('names the toggle after the row', () => {
@@ -90,6 +134,8 @@ describe('Table', () => {
     expect(css).toMatch(/container-type:\s*inline-size/);
     expect(css).toMatch(/@container \(max-width: 720px\)/);
     expect(css).toMatch(/overflow-x:\s*auto/);
+    expect(css).toMatch(/min-width: 0/);
+    expect(css).toMatch(/.root {[^}]*position: relative/);
   });
 
   it('has no a11y violations', async () => {
