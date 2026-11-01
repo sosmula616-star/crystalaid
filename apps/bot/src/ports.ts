@@ -31,16 +31,19 @@ export interface DiscordPort {
   sendDm(userId: string, msg: OutMessage): Promise<MsgRef>;
   edit(ref: MsgRef, msg: OutMessage): Promise<void>;
   sendLog(msg: LogMessage): Promise<void>;
+  /** Re-uploads a file to the log channel and returns the URL of the log message that holds it. */
+  archiveFile(file: { url: string; name: string }, caption: string): Promise<string>;
 }
 
-export interface TicketMeta {
-  description: string;
+/** A file attached to a DM. */
+export interface Attachment {
+  url: string;
+  name: string;
+  size: number;
 }
 
-/** Short-lived memory of the bot (Redis, 24 hours). */
+/** Short-lived memory of the bot (Redis, 24 hours): where the offer messages of a ticket are. */
 export interface OfferStore {
-  remember(ticketId: string, meta: TicketMeta): Promise<void>;
-  meta(ticketId: string): Promise<TicketMeta | null>;
   addOffer(ticketId: string, userId: string, ref: MsgRef): Promise<void>;
   offers(ticketId: string): Promise<{ userId: string; ref: MsgRef }[]>;
 }
@@ -54,6 +57,8 @@ export interface Replier {
 }
 export interface ButtonCtx {
   userId: string;
+  /** Discord username, for the log (the log server may not know the person). */
+  username?: string;
   /** Replaces the message the button is on. */
   update(msg: OutMessage): Promise<void>;
   /** Ephemeral note, the message stays as it is. */

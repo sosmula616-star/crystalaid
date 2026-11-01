@@ -36,6 +36,13 @@
       "when": 1793534845797,
       "tag": "0004_ticket_challenge_options",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793537494318,
+      "tag": "0005_ticket_last_activity",
+      "breakpoints": true
     }
   ]
 }

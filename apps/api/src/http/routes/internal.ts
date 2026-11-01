@@ -8,9 +8,11 @@ import type { ServerConfig } from '@crystalaid/config';
 import {
   ActorQuery,
   AppError,
+  CancelRequest,
   ClaimRequest,
   CloseRequest,
   CreateTicketRequest,
+  DeliveryFailureRequest,
   DiscordId,
   InternalPermissionsPatch,
   MenuSettingsPatchRequest,
@@ -19,9 +21,15 @@ import {
   PtSlotQuery,
   PtSlotRequest,
   RatingRequest,
+  ReleaseRequest,
+  ReminderConfirmRequest,
   TicketIdParams,
+  type CancelResponse,
   type ClaimResponse,
   type CloseResponse,
+  type DeliveryFailuresResponse,
+  type ExpiredTicketsResponse,
+  type ReleaseResponse,
   type CreateTicketResponse,
   type DiagnosticsResponse,
   type MenuAccessResponse,
@@ -36,16 +44,20 @@ import { alias } from 'drizzle-orm/pg-core';
 import { loadActor, requireActor } from '../../services/actor.js';
 import { getGrants, updateGrants } from '../../services/permissions.js';
 import { redactSecrets } from '../redact.js';
-import { listSlots, removeSlot, setSlot, dueReminders } from '../../services/pt.js';
+import { listDeliveryFailures, recordDeliveryFailure } from '../../services/delivery.js';
+import { confirmReminder, listSlots, removeSlot, setSlot, dueReminders } from '../../services/pt.js';
 import { getSettings, patchSettings } from '../../services/settings.js';
 import {
   activeTicket,
   addMessage,
+  cancelTicket,
   claimTicket,
   closeTicket,
   createTicket,
   dueTickets,
+  expireStaleTickets,
   rateTicket,
+  releaseTicket,
 } from '../../services/tickets.js';
 import { DEAD_STREAM, STREAM } from '../../worker/consumer.js';
 
@@ -185,7 +197,11 @@ export function registerInternal(
     const body = ClaimRequest.parse(request.body);
     await requireActor(svc, body.actorDiscordId, 'SUPPORT');
     const r = await claimTicket(svc, id, body.actorDiscordId, body.choiceIndex);
-    return { result: r.result, ...(r.requesterDiscordId ? { requesterDiscordId: r.requesterDiscordId } : {}) };
+    return {
+      result: r.result,
+      ...(r.requesterDiscordId ? { requesterDiscordId: r.requesterDiscordId } : {}),
+      ...(r.ticket && (r.result === 'claimed' || r.result === 'yours') ? { description: r.ticket.description } : {}),
+    };
   });
 
   // The actor is the author; the service checks they are the requester or the claimer.
@@ -200,7 +216,33 @@ export function registerInternal(
     const body = CloseRequest.parse(request.body);
     const actor = await requireActor(svc, body.actorDiscordId, 'SUPPORT');
     const r = await closeTicket(svc, id, actor);
-    return { ticketId: r.ticket.id, requesterDiscordId: r.requesterDiscordId, transcript: r.transcript };
+    return {
+      ticketId: r.ticket.id,
+      requesterDiscordId: r.requesterDiscordId,
+      claimerDiscordId: r.claimerDiscordId,
+      transcript: r.transcript,
+      messageCount: r.messageCount,
+    };
+  });
+
+  app.post('/internal/tickets/:id/cancel', guard, async (request): Promise<CancelResponse> => {
+    const { id } = TicketIdParams.parse(request.params);
+    const body = CancelRequest.parse(request.body);
+    return cancelTicket(svc, id, body.actorDiscordId);
+  });
+
+  // An admin returns a claimed ticket to the queue.
+  app.post('/internal/tickets/:id/release', guard, async (request): Promise<ReleaseResponse> => {
+    const { id } = TicketIdParams.parse(request.params);
+    const body = ReleaseRequest.parse(request.body);
+    const actor = await requireActor(svc, body.actorDiscordId, 'ADMIN');
+    const r = await releaseTicket(svc, id, actor);
+    return { ticketId: r.ticket.id, requesterDiscordId: r.requesterDiscordId, claimerDiscordId: r.claimerDiscordId };
+  });
+
+  // Scheduler call: closes tickets idle for 24 hours and hands back what the bot must announce.
+  app.post('/internal/tickets/expire', guard, async (): Promise<ExpiredTicketsResponse> => {
+    return { items: await expireStaleTickets(svc) };
   });
 
   app.post('/internal/tickets/:id/rating', guard, async (request) => {
@@ -244,6 +286,27 @@ export function registerInternal(
   app.get('/internal/pt/reminders', guard, async () => {
     const items = await dueReminders(svc);
     return { items: items.map((s) => ({ ...s, startsAt: s.startsAt.toISOString() })) };
+  });
+
+  // The bot confirms a reminder after the DM went out; until then it is handed out again.
+  app.post('/internal/pt/reminders/confirm', guard, async (request) => {
+    const body = ReminderConfirmRequest.parse(request.body);
+    await confirmReminder(svc, body.slotId);
+    return { ok: true };
+  });
+
+  // Failed DMs: the bot reports each one; admins read the last 20 in the menu.
+  app.post('/internal/delivery-failures', guard, async (request) => {
+    const body = DeliveryFailureRequest.parse(request.body);
+    await recordDeliveryFailure(svc, body);
+    return { ok: true };
+  });
+
+  app.get('/internal/delivery-failures', guard, async (request): Promise<DeliveryFailuresResponse> => {
+    const { actorDiscordId } = ActorQuery.parse(request.query);
+    await requireActor(svc, actorDiscordId, 'ADMIN');
+    const items = await listDeliveryFailures(svc);
+    return { items: items.map((f) => ({ ...f, at: f.at.toISOString() })) };
   });
 
   app.get('/internal/menu/settings', guard, async (request): Promise<Settings> => {

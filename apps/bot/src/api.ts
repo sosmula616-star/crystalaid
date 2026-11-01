@@ -1,10 +1,13 @@
 import {
   ActiveTicketResponse,
+  CancelResponse,
   ClaimResponse,
   CloseResponse,
   CreateTicketResponse,
+  DeliveryFailuresResponse,
   DiagnosticsResponse,
   DueTicketsResponse,
+  ExpiredTicketsResponse,
   MenuAccessResponse,
   OpenTicketsResponse,
   PermissionsResponse,
@@ -12,6 +15,7 @@ import {
   SettingsSchema,
   MessageResponse,
   PtRemindersResponse,
+  ReleaseResponse,
   type ClaimRequest,
   type CreateTicketRequest,
   type Settings,
@@ -98,11 +102,28 @@ export class ApiClient {
     return (await this.call('GET', '/internal/tickets/active', ActiveTicketResponse, undefined, { actorDiscordId }))
       .ticket;
   }
+  cancel(ticketId: string, actorDiscordId: string): Promise<CancelResponse> {
+    return this.call('POST', `/internal/tickets/${ticketId}/cancel`, CancelResponse, { actorDiscordId });
+  }
+  release(ticketId: string, actorDiscordId: string): Promise<ReleaseResponse> {
+    return this.call('POST', `/internal/tickets/${ticketId}/release`, ReleaseResponse, { actorDiscordId });
+  }
+  /** Closes the tickets idle for 24 hours and returns them for the announcements. */
+  expire(): Promise<ExpiredTicketsResponse> {
+    return this.call('POST', '/internal/tickets/expire', ExpiredTicketsResponse, {});
+  }
   due(): Promise<DueTicketsResponse> {
     return this.call('GET', '/internal/tickets/due', DueTicketsResponse);
   }
   reminders(): Promise<PtRemindersResponse> {
     return this.call('GET', '/internal/pt/reminders', PtRemindersResponse);
+  }
+  /** Marks a reminder as sent; call it only after the DM went out. */
+  async confirmReminder(slotId: string): Promise<void> {
+    await this.call('POST', '/internal/pt/reminders/confirm', passthrough, { slotId });
+  }
+  async reportDelivery(targetDiscordId: string, what: string, code: number | null): Promise<void> {
+    await this.call('POST', '/internal/delivery-failures', passthrough, { targetDiscordId, what, code });
   }
   // ---------- menus: the API checks the level of `actorDiscordId` on each of these ----------
 
@@ -132,6 +153,9 @@ export class ApiClient {
   }
   openTickets(actorDiscordId: string): Promise<OpenTicketsResponse> {
     return this.call('GET', '/internal/tickets/open', OpenTicketsResponse, undefined, { actorDiscordId });
+  }
+  deliveryFailures(actorDiscordId: string): Promise<DeliveryFailuresResponse> {
+    return this.call('GET', '/internal/delivery-failures', DeliveryFailuresResponse, undefined, { actorDiscordId });
   }
   diagnostics(actorDiscordId: string): Promise<DiagnosticsResponse> {
     return this.call('GET', '/internal/diagnostics', DiagnosticsResponse, undefined, { actorDiscordId });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BotEvent } from '@crystalaid/contracts';
 import { BotEvent as BotEventSchema } from '@crystalaid/contracts';
-import { createRoster, type RosterMember } from './roster.js';
+import { createRoster, createSnapshotRunner, snapshotWithRetry, type RosterMember } from './roster.js';
 import { CFG, id } from './testing/kit.js';
 
 const SUPPORT = CFG.roles.support[0]!;
@@ -92,5 +92,111 @@ describe('snapshot', () => {
       fetchByIds: async (ids) => ((fetched = ids), []),
     });
     expect(fetched).toEqual([id(21)]);
+  });
+});
+
+describe('snapshot retries (I4)', () => {
+  const rateLimited = (seconds: number) => Object.assign(new Error('rate limited'), { data: { retry_after: seconds } });
+
+  it('waits at least retry_after, logs every failure and publishes once it works', async () => {
+    const { roster, events } = setup();
+    let tries = 0;
+    const sleeps: number[] = [];
+    const fails: number[] = [];
+    const n = await snapshotWithRetry(
+      roster,
+      {
+        fetchAll: async () => {
+          if (++tries <= 2) throw rateLimited(20);
+          return [member(70, [SUPPORT])];
+        },
+        fetchByIds: async () => [],
+      },
+      { baseMs: 1000, sleep: async (ms) => void sleeps.push(ms), onFail: (_e, attempt) => void fails.push(attempt) },
+    );
+    expect(n).toBe(1);
+    expect(sleeps).toEqual([20_000, 20_000]);
+    expect(fails).toEqual([1, 2]);
+    expect(events.map((e) => e.type)).toEqual(['member.snapshot']);
+  });
+
+  it('backs off exponentially, gives up with the last error, and known stays usable', async () => {
+    const { roster, events } = setup();
+    await roster.memberUpdated(member(70, [SUPPORT]));
+    events.length = 0;
+    const sleeps: number[] = [];
+    await expect(
+      snapshotWithRetry(
+        roster,
+        {
+          fetchAll: async () => {
+            throw new Error('Gateway timeout');
+          },
+          fetchByIds: async () => [],
+        },
+        { attempts: 4, baseMs: 1000, sleep: async (ms) => void sleeps.push(ms) },
+      ),
+    ).rejects.toThrow('Gateway timeout');
+    expect(sleeps).toEqual([1000, 2000, 4000]);
+    // The member remembered before is still known, so their removal still reaches the API.
+    await roster.memberRemoved(id(70), []);
+    expect(events.map((e) => e.type)).toEqual(['member.removed']);
+  });
+});
+
+describe('snapshot runner (I5)', () => {
+  const flush = () => new Promise<void>((r) => setImmediate(r));
+
+  it('runs one snapshot at a time, runs once more for triggers that came meanwhile, and repeats daily', async () => {
+    const gates: (() => void)[] = [];
+    const done: string[] = [];
+    const failed: string[] = [];
+    let timer: { fn: () => void; ms: number } | undefined;
+    let cleared = false;
+    const runner = createSnapshotRunner({
+      run: () => new Promise<number>((res) => gates.push(() => res(5))),
+      onDone: (n, reason) => void done.push(`${reason}:${n}`),
+      onFail: (_e, reason) => void failed.push(reason),
+      setIntervalFn: ((fn: () => void, ms: number) => ((timer = { fn, ms }), 1)) as never,
+      clearIntervalFn: (() => void (cleared = true)) as never,
+    });
+    runner.trigger('startup');
+    runner.trigger('invalidated');
+    runner.trigger('invalidated');
+    await flush();
+    expect(gates).toHaveLength(1);
+    gates[0]!();
+    await flush();
+    expect(gates).toHaveLength(2);
+    gates[1]!();
+    await flush();
+    expect(done).toEqual(['startup:5', 'invalidated:5']);
+
+    runner.start();
+    expect(timer!.ms).toBe(24 * 60 * 60_000);
+    timer!.fn();
+    await flush();
+    expect(gates).toHaveLength(3);
+    runner.stop();
+    expect(cleared).toBe(true);
+    expect(failed).toEqual([]);
+  });
+
+  it('reports a failed run and can run again', async () => {
+    const failed: string[] = [];
+    let n = 0;
+    const runner = createSnapshotRunner({
+      run: async () => {
+        if (++n === 1) throw new Error('nope');
+        return 1;
+      },
+      onFail: (_e, reason) => void failed.push(reason),
+    });
+    runner.trigger('daily');
+    await flush();
+    runner.trigger('daily');
+    await flush();
+    expect(failed).toEqual(['daily']);
+    expect(n).toBe(2);
   });
 });

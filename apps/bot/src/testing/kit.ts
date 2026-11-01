@@ -2,7 +2,7 @@ import type { ItemKey } from '@crystalaid/domain';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ApiClient } from '../api.js';
-import type { DiscordPort, LogMessage, MsgRef, OfferStore, OutMessage, TicketMeta } from '../ports.js';
+import type { DiscordPort, LogMessage, MsgRef, OfferStore, OutMessage } from '../ports.js';
 
 export const id = (n: number): string => (100000000000000000n + BigInt(n)).toString();
 export const TICKET = '11111111-2222-4333-8444-555555555555';
@@ -67,6 +67,10 @@ export class FakeDiscord implements DiscordPort {
   logs: LogMessage[] = [];
   closedDms = new Set<string>();
   brokenLog = false;
+  /** Log sends that fail before one succeeds. */
+  logFailures = 0;
+  archived: { file: { url: string; name: string }; caption: string }[] = [];
+  brokenArchive = false;
   private n = 0;
 
   async sendDm(userId: string, msg: OutMessage): Promise<MsgRef> {
@@ -80,7 +84,16 @@ export class FakeDiscord implements DiscordPort {
   }
   async sendLog(msg: LogMessage): Promise<void> {
     if (this.brokenLog) throw new Error('log down');
+    if (this.logFailures > 0) {
+      this.logFailures--;
+      throw new Error('log hiccup');
+    }
     this.logs.push(msg);
+  }
+  async archiveFile(file: { url: string; name: string }, caption: string): Promise<string> {
+    if (this.brokenArchive) throw new Error('archive down');
+    this.archived.push({ file, caption });
+    return `https://discord.com/channels/${CFG.guildId}/${CFG.channels.log}/archive${this.archived.length}`;
   }
   dmsTo(userId: string) {
     return this.dms.filter((d) => d.userId === userId);
@@ -91,18 +104,14 @@ export class FakeDiscord implements DiscordPort {
 }
 
 export class MemoryStore implements OfferStore {
-  metas = new Map<string, TicketMeta>();
   offerMap = new Map<string, { userId: string; ref: MsgRef }[]>();
-  async remember(t: string, m: TicketMeta) {
-    this.metas.set(t, m);
-  }
-  async meta(t: string) {
-    return this.metas.get(t) ?? null;
-  }
+  broken = false;
   async addOffer(t: string, userId: string, ref: MsgRef) {
+    if (this.broken) throw new Error('redis down');
     this.offerMap.set(t, [...(this.offerMap.get(t) ?? []), { userId, ref }]);
   }
   async offers(t: string) {
+    if (this.broken) throw new Error('redis down');
     return this.offerMap.get(t) ?? [];
   }
 }

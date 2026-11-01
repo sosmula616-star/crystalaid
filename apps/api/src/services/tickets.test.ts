@@ -4,6 +4,7 @@ import {
   auditLog,
   ptSlots,
   staffDaily,
+  staffMembers,
   ticketChallenges,
   ticketMessages,
   tickets,
@@ -13,15 +14,18 @@ import {
 } from '@crystalaid/database';
 import { loadActor } from './actor.js';
 import { setSlot } from './pt.js';
-import { syncMember } from './staff.js';
+import { removeMember, syncMember } from './staff.js';
 import {
   activeTicket,
   addMessage,
   claimTicket,
   closeTicket,
+  cancelTicket,
   createTicket,
   dueTickets,
+  expireStaleTickets,
   rateTicket,
+  releaseTicket,
 } from './tickets.js';
 import { ADMIN_ROLE, CURATOR_ROLE, SUPPORT_ROLE, config, discordId, memberInput } from '../test-helpers.js';
 
@@ -298,5 +302,219 @@ describe('config users', () => {
       expect(again).toMatchObject({ level: 'DEVELOPER', status: 'active' });
       expect((await loadActor(deps, devId))!.level).toBe('DEVELOPER');
       expect(await db.select().from(users).where(eq(users.discordId, devId))).toHaveLength(1);
+    }));
+});
+
+describe('one claimed ticket per support (C1)', () => {
+  it('answers busy without spending the attempt, then lets the support claim after closing', async () =>
+    withTestDb(async (db) => {
+      const { deps, admin } = await setup(db, [SUPPORT_A]);
+      const first = await open(deps, 'one', NOW, 50);
+      const second = await open(deps, 'two', NOW, 51);
+      const a1 = challengeFor(first, SUPPORT_A);
+      expect((await claimTicket(deps, first.ticket.id, discordId(SUPPORT_A), rightIndex(a1), NOW)).result).toBe('claimed');
+      const a2 = challengeFor(second, SUPPORT_A);
+      const busy = await claimTicket(deps, second.ticket.id, discordId(SUPPORT_A), rightIndex(a2), NOW);
+      expect(busy.result).toBe('busy');
+      const [row] = await db.select().from(ticketChallenges).where(eq(ticketChallenges.ticketId, second.ticket.id));
+      expect(row!.attemptedAt).toBeNull();
+      expect((await db.select().from(tickets).where(eq(tickets.id, second.ticket.id)))[0]!.status).toBe('open');
+      await closeTicket(deps, first.ticket.id, admin, NOW);
+      expect((await claimTicket(deps, second.ticket.id, discordId(SUPPORT_A), rightIndex(a2), NOW)).result).toBe('claimed');
+    }));
+
+  it('lets only one of two parallel claims on different tickets win', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A]);
+      const first = await open(deps, 'one', NOW, 50);
+      const second = await open(deps, 'two', NOW, 51);
+      const results = await Promise.all([
+        claimTicket(deps, first.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(first, SUPPORT_A)), NOW),
+        claimTicket(deps, second.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(second, SUPPORT_A)), NOW),
+      ]);
+      expect(results.map((r) => r.result).sort()).toEqual(['busy', 'claimed']);
+    }));
+
+  it('activeTicket prefers the ticket the person claimed over their own newer open ticket', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A, SUPPORT_B]);
+      const theirs = await open(deps, 'user ticket', NOW, 50);
+      await claimTicket(deps, theirs.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(theirs, SUPPORT_A)), NOW);
+      await open(deps, 'my own question', new Date(NOW.getTime() + MIN), SUPPORT_A);
+      expect(await activeTicket(deps, discordId(SUPPORT_A))).toMatchObject({
+        ticketId: theirs.ticket.id,
+        role: 'support',
+        status: 'claimed',
+        counterpartDiscordId: discordId(50),
+      });
+    }));
+});
+
+describe('claiming twice (I1)', () => {
+  it('answers yours when the claimer presses again', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A]);
+      const created = await open(deps);
+      const idx = rightIndex(challengeFor(created, SUPPORT_A));
+      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), idx, NOW)).result).toBe('claimed');
+      const again = await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), idx, NOW);
+      expect(again).toMatchObject({ result: 'yours', ticket: { description: 'help me' } });
+      expect((await db.select().from(staffDaily))[0]).toMatchObject({ ticketsClaimed: 1 });
+    }));
+});
+
+describe('re-offer keeps live buttons (C4)', () => {
+  it('returns the same options for an unattempted challenge', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A]);
+      const created = await open(deps);
+      const first = challengeFor(created, SUPPORT_A);
+      const due = await dueTickets(deps, new Date(NOW.getTime() + 6 * MIN));
+      expect(due[0]!.challenges[0]!.challenge).toEqual(first);
+      expect(await db.select().from(ticketChallenges)).toHaveLength(1);
+      // The button of the first offer still works after the re-offer.
+      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), rightIndex(first), NOW)).result).toBe(
+        'claimed',
+      );
+    }));
+
+  it('regenerates a challenge that has no stored options', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A]);
+      await open(deps);
+      await db.update(ticketChallenges).set({ options: [] });
+      const due = await dueTickets(deps, new Date(NOW.getTime() + 6 * MIN));
+      expect(due[0]!.challenges[0]!.challenge.options).toHaveLength(4);
+    }));
+});
+
+describe('messages need an active claimer (I2)', () => {
+  it('refuses a claimer who is no longer active staff', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A]);
+      const created = await open(deps);
+      await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(created, SUPPORT_A)), NOW);
+      await db.update(staffMembers).set({ status: 'inactive', level: 'NONE' });
+      await expect(addMessage(deps, created.ticket.id, discordId(SUPPORT_A), 'hi')).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+      await expect(addMessage(deps, created.ticket.id, discordId(REQUESTER), 'hello')).resolves.toBeDefined();
+    }));
+});
+
+describe('ways out of a stuck ticket (C3)', () => {
+  async function claimedBy(db: Db, onDuty = [SUPPORT_A, SUPPORT_B]) {
+    const { deps, admin } = await setup(db, onDuty);
+    const created = await open(deps);
+    await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(created, SUPPORT_A)), NOW);
+    return { deps, admin, id: created.ticket.id };
+  }
+
+  it('release returns a claimed ticket to open, audits it and offers it again', async () =>
+    withTestDb(async (db) => {
+      const { deps, admin, id } = await claimedBy(db);
+      const supportA = (await loadActor(deps, discordId(SUPPORT_A)))!;
+      await expect(releaseTicket(deps, id, supportA, NOW)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const later = new Date(NOW.getTime() + MIN);
+      const r = await releaseTicket(deps, id, admin, later);
+      expect(r).toMatchObject({ requesterDiscordId: discordId(REQUESTER), claimerDiscordId: discordId(SUPPORT_A) });
+      const [t] = await db.select().from(tickets);
+      expect(t).toMatchObject({ status: 'open', claimedBy: null, claimedAt: null });
+      expect((await db.select().from(auditLog).where(eq(auditLog.action, 'ticket.released')))).toHaveLength(1);
+      await expect(releaseTicket(deps, id, admin, later)).rejects.toMatchObject({ code: 'CONFLICT' });
+      const due = await dueTickets(deps, later);
+      expect(due).toHaveLength(1);
+      expect(due[0]).toMatchObject({ ticketId: id, reoffer: true });
+      // The old claimer keeps the spent attempt; the other support gets the ticket.
+      expect(due[0]!.challenges.map((c) => c.supportDiscordId)).toEqual([discordId(SUPPORT_B)]);
+    }));
+
+  it('releases the claimed ticket when its claimer is deactivated, audited', async () =>
+    withTestDb(async (db) => {
+      const { deps, id } = await claimedBy(db);
+      await syncMember(deps, { ...memberInput(SUPPORT_A, []), at: new Date(NOW.getTime() + MIN) });
+      expect((await db.select().from(tickets))[0]).toMatchObject({ status: 'open', claimedBy: null });
+      const [a] = await db.select().from(auditLog).where(eq(auditLog.action, 'ticket.released'));
+      expect(a).toMatchObject({ reason: 'claimer_deactivated' });
+      expect(a!.data).toMatchObject({ ticketId: id });
+    }));
+
+  it('releases the claimed ticket when its claimer leaves the server', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await claimedBy(db);
+      await removeMember(deps, discordId(SUPPORT_A), new Date(NOW.getTime() + MIN));
+      expect((await db.select().from(tickets))[0]).toMatchObject({ status: 'open', claimedBy: null });
+      expect((await db.select().from(auditLog).where(eq(auditLog.action, 'ticket.released')))).toHaveLength(1);
+    }));
+
+  it('lets the requester cancel only a ticket nobody has claimed', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A]);
+      const created = await open(deps);
+      await expect(cancelTicket(deps, created.ticket.id, discordId(SUPPORT_A), NOW)).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+      expect(await cancelTicket(deps, created.ticket.id, discordId(REQUESTER), NOW)).toEqual({ result: 'cancelled' });
+      expect((await db.select().from(tickets))[0]).toMatchObject({ status: 'closed' });
+      expect((await db.select().from(auditLog).where(eq(auditLog.action, 'ticket.cancelled')))).toHaveLength(1);
+      expect(await cancelTicket(deps, created.ticket.id, discordId(REQUESTER), NOW)).toEqual({ result: 'closed' });
+      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), 0, NOW)).result).toBe('closed');
+
+      const other = await open(deps, 'again', new Date(NOW.getTime() + 10 * MIN), 51);
+      await claimTicket(deps, other.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(other, SUPPORT_A)), NOW);
+      expect(await cancelTicket(deps, other.ticket.id, discordId(51), NOW)).toEqual({ result: 'claimed' });
+    }));
+
+  it('closes tickets idle for 24 hours with a transcript, and spares active ones', async () =>
+    withTestDb(async (db) => {
+      const { deps, id } = await claimedBy(db);
+      const idle = await open(deps, 'idle one', NOW, 51);
+      const day = 24 * 60 * MIN;
+      await addMessage(deps, id, discordId(SUPPORT_A), 'still here', new Date(NOW.getTime() + 20 * 60 * MIN));
+      expect(await expireStaleTickets(deps, new Date(NOW.getTime() + day - MIN))).toEqual([]);
+      const done = await expireStaleTickets(deps, new Date(NOW.getTime() + day + MIN));
+      expect(done.map((d) => d.ticketId)).toEqual([idle.ticket.id]);
+      expect(done[0]).toMatchObject({ requesterDiscordId: discordId(51), claimerDiscordId: null, messageCount: 1 });
+      expect(done[0]!.transcript).toContain('idle one');
+      const [t] = await db.select().from(tickets).where(eq(tickets.id, idle.ticket.id));
+      expect(t).toMatchObject({ status: 'closed', closedBy: null });
+      expect((await db.select().from(auditLog).where(eq(auditLog.action, 'ticket.expired')))).toHaveLength(1);
+      // 24 hours after the claimed ticket's last message it goes as well.
+      const later = await expireStaleTickets(deps, new Date(NOW.getTime() + 20 * 60 * MIN + day + MIN));
+      expect(later.map((d) => d.ticketId)).toEqual([id]);
+      expect(later[0]!.claimerDiscordId).toBe(discordId(SUPPORT_A));
+    }));
+});
+
+describe('minor ticket rules', () => {
+  it('indents continuation lines and returns a real message count', async () =>
+    withTestDb(async (db) => {
+      const { deps, admin } = await setup(db, [SUPPORT_A]);
+      const created = await open(deps, 'line one\nline two');
+      await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(created, SUPPORT_A)), NOW);
+      await addMessage(deps, created.ticket.id, discordId(SUPPORT_A), '[fake] header\nsecond', new Date(NOW.getTime() + MIN));
+      const r = await closeTicket(deps, created.ticket.id, admin, new Date(NOW.getTime() + 2 * MIN));
+      expect(r.messageCount).toBe(2);
+      expect(r.transcript).toContain('user50: line one\n    line two');
+      expect(r.transcript).toContain('\n    second');
+      expect(r.transcript.split('\n').filter((l) => l.startsWith('['))).toHaveLength(2);
+    }));
+
+  it('caps a round at 10 tickets and a support at 3 outstanding offers', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, []);
+      for (let i = 0; i < 12; i++) await open(deps, `q${i}`, new Date(NOW.getTime() - i * 10 * MIN), 100 + i);
+      const admin = (await loadActor(deps, discordId(ADMIN)))!;
+      await setSlot(deps, admin, { startsAt: HOUR, discordUserId: discordId(SUPPORT_A) });
+      await setSlot(deps, admin, { startsAt: HOUR, discordUserId: discordId(SUPPORT_B) });
+      const round = await dueTickets(deps, NOW, 10);
+      // Both supports are full after three tickets, so only three go out.
+      expect(round).toHaveLength(3);
+      const per = new Map<string, number>();
+      for (const d of round) for (const c of d.challenges) per.set(c.supportDiscordId, (per.get(c.supportDiscordId) ?? 0) + 1);
+      expect([...per.values()].every((n) => n <= 3)).toBe(true);
+      const second = await dueTickets(deps, new Date(NOW.getTime() + 6 * MIN), 10);
+      // The same three are offered again with the same tasks; nothing new reaches a full support.
+      expect(second.map((d) => d.ticketId).sort()).toEqual(round.map((d) => d.ticketId).sort());
     }));
 });

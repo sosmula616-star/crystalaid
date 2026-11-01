@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, isNull, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lt, lte, ne } from 'drizzle-orm';
 import type { ServerConfig } from '@crystalaid/config';
 import { AppError } from '@crystalaid/contracts';
 import { ptSlots, staffMembers, users, type Db } from '@crystalaid/database';
@@ -113,37 +113,58 @@ export async function listSlots(deps: PtDeps, date: string): Promise<PtSlot[]> {
     .orderBy(asc(ptSlots.startsAt), asc(users.username));
 }
 
+export interface DueReminder extends PtSlot {
+  slotId: string;
+}
+
 /**
- * Slots starting within the next 5 minutes that have not been reminded. One UPDATE marks and
- * returns them, so parallel callers never get the same slot twice.
+ * Slots of active staff starting within the next 5 minutes that have not been confirmed as
+ * reminded. Reading marks nothing: the bot confirms each slot after its DM went out
+ * (`confirmReminder`), so a failed send, a crash or a restart gets the slot again on the next pass.
  */
-export async function dueReminders(deps: PtDeps, now: Date = new Date()): Promise<PtSlot[]> {
+export async function dueReminders(deps: PtDeps, now: Date = new Date()): Promise<DueReminder[]> {
   const { db, config } = deps;
-  return db.transaction(async (tx) => {
-    const marked = await tx
+  const rows = await db
+    .select({ slotId: ptSlots.id, startsAt: ptSlots.startsAt, discordId: users.discordId, username: users.username })
+    .from(ptSlots)
+    .innerJoin(users, eq(users.id, ptSlots.userId))
+    .innerJoin(
+      staffMembers,
+      and(
+        eq(staffMembers.userId, ptSlots.userId),
+        eq(staffMembers.guildId, ptSlots.guildId),
+        eq(staffMembers.status, 'active'),
+        ne(staffMembers.level, 'NONE'),
+      ),
+    )
+    .where(
+      and(
+        eq(ptSlots.guildId, config.guildId),
+        isNull(ptSlots.remindedAt),
+        gte(ptSlots.startsAt, now),
+        lte(ptSlots.startsAt, new Date(now.getTime() + REMINDER_LEAD_MS)),
+      ),
+    )
+    .orderBy(asc(ptSlots.startsAt), asc(users.username));
+  return rows;
+}
+
+/** Marks a reminder as sent. Repeating it, also in parallel, changes nothing and audits once. */
+export async function confirmReminder(deps: PtDeps, slotId: string, now: Date = new Date()): Promise<void> {
+  const { db, config } = deps;
+  await db.transaction(async (tx) => {
+    const [marked] = await tx
       .update(ptSlots)
       .set({ remindedAt: now })
-      .where(
-        and(
-          eq(ptSlots.guildId, config.guildId),
-          isNull(ptSlots.remindedAt),
-          gte(ptSlots.startsAt, now),
-          lte(ptSlots.startsAt, new Date(now.getTime() + REMINDER_LEAD_MS)),
-        ),
-      )
+      .where(and(eq(ptSlots.id, slotId), eq(ptSlots.guildId, config.guildId), isNull(ptSlots.remindedAt)))
       .returning({ startsAt: ptSlots.startsAt, userId: ptSlots.userId });
-    const out: PtSlot[] = [];
-    for (const m of marked) {
-      const [u] = await tx.select().from(users).where(eq(users.id, m.userId));
-      out.push({ startsAt: m.startsAt, discordId: u!.discordId, username: u!.username });
-      await writeAudit(tx, {
-        guildId: config.guildId,
-        actorUserId: null,
-        action: 'pt.reminded',
-        targetUserId: m.userId,
-        data: { startsAt: m.startsAt.toISOString() },
-      });
-    }
-    return out.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+    if (!marked) return;
+    await writeAudit(tx, {
+      guildId: config.guildId,
+      actorUserId: null,
+      action: 'pt.reminded',
+      targetUserId: marked.userId,
+      data: { startsAt: marked.startsAt.toISOString() },
+    });
   });
 }

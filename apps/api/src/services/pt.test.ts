@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { auditLog, ptSlots, withTestDb } from '@crystalaid/database';
 import { loadActor } from './actor.js';
-import { dueReminders, listSlots, removeSlot, setSlot } from './pt.js';
-import { syncMember } from './staff.js';
+import { confirmReminder, dueReminders, listSlots, removeSlot, setSlot } from './pt.js';
+import { removeMember, syncMember } from './staff.js';
 import { ADMIN_ROLE, SUPPORT_ROLE, config, discordId, memberInput } from '../test-helpers.js';
 
 const HOUR = new Date('2026-11-02T10:00:00Z'); // 13:00 in Moscow
@@ -63,15 +63,27 @@ describe('PT slots', () => {
       });
     }));
 
-  it('hands out a reminder once, even to parallel callers, and only for slots within 5 minutes', async () =>
+  it('hands a reminder out until it is confirmed, only within 5 minutes, and confirms once', async () =>
     withTestDb(async (db) => {
       const { deps, admin } = await setup(db);
       await setSlot(deps, admin, { startsAt: HOUR, discordUserId: discordId(2) });
       expect(await dueReminders(deps, new Date(HOUR.getTime() - 6 * MIN))).toEqual([]);
       const at = new Date(HOUR.getTime() - 4 * MIN);
-      const results = await Promise.all([dueReminders(deps, at), dueReminders(deps, at), dueReminders(deps, at)]);
-      expect(results.flat()).toHaveLength(1);
-      expect(results.flat()[0]).toMatchObject({ discordId: discordId(2), startsAt: HOUR });
+      const first = await dueReminders(deps, at);
+      expect(first).toHaveLength(1);
+      expect(first[0]).toMatchObject({ discordId: discordId(2), startsAt: HOUR });
+      // A failed send is not confirmed, so the next pass (or a restarted bot) gets it again.
+      expect(await dueReminders(deps, new Date(at.getTime() + MIN))).toHaveLength(1);
+      await Promise.all([1, 2, 3].map(() => confirmReminder(deps, first[0]!.slotId, at)));
       expect(await dueReminders(deps, at)).toEqual([]);
+      expect((await db.select().from(auditLog)).filter((a) => a.action === 'pt.reminded')).toHaveLength(1);
+    }));
+
+  it('does not remind staff who are no longer active', async () =>
+    withTestDb(async (db) => {
+      const { deps, admin } = await setup(db);
+      await setSlot(deps, admin, { startsAt: HOUR, discordUserId: discordId(2) });
+      await removeMember(deps, discordId(2), new Date());
+      expect(await dueReminders(deps, new Date(HOUR.getTime() - 4 * MIN))).toEqual([]);
     }));
 });

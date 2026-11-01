@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { and, asc, desc, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { ServerConfig } from '@crystalaid/config';
 import { AppError } from '@crystalaid/contracts';
 import {
@@ -39,6 +39,13 @@ export const TICKET_CATEGORY = 'dm';
 export const NEW_TICKET_COOLDOWN_MS = 5 * 60_000;
 export const REOFFER_AFTER_MS = 5 * 60_000;
 export const MAX_MESSAGE_LENGTH = 4000;
+/** A round of `dueTickets` offers at most this many tickets. */
+export const DUE_PER_ROUND = 10;
+/** Candidates looked at per round, so tickets nobody can take do not hide the ones behind them. */
+const DUE_SCAN_LIMIT = 100;
+export const MAX_OUTSTANDING_OFFERS = 3;
+/** A ticket with no message, claim or release for this long is closed by the scheduler. */
+export const IDLE_CLOSE_AFTER_MS = 24 * 60 * 60_000;
 /** The first message is the /help modal question. */
 export const FIRST_MESSAGE_MAX_LENGTH = 300;
 
@@ -89,25 +96,75 @@ async function onDutySupports(
     .where(and(eq(ptSlots.guildId, deps.config.guildId), eq(ptSlots.startsAt, start)));
 }
 
-/** Issues (or re-issues, if not yet attempted) a challenge for each support. */
+/** open tickets a support was offered and has not answered, per support (user id to ticket ids) */
+type Outstanding = Map<string, Set<string>>;
+
+async function outstandingOffers(tx: Tx, guildId: string, userIds: string[]): Promise<Outstanding> {
+  const out: Outstanding = new Map();
+  if (userIds.length === 0) return out;
+  const rows = await tx
+    .select({ userId: ticketChallenges.userId, ticketId: ticketChallenges.ticketId })
+    .from(ticketChallenges)
+    .innerJoin(tickets, eq(tickets.id, ticketChallenges.ticketId))
+    .where(
+      and(
+        eq(tickets.guildId, guildId),
+        eq(tickets.status, 'open'),
+        isNull(ticketChallenges.attemptedAt),
+        inArray(ticketChallenges.userId, userIds),
+      ),
+    );
+  for (const r of rows) out.set(r.userId, (out.get(r.userId) ?? new Set()).add(r.ticketId));
+  return out;
+}
+
+/**
+ * Issues a challenge for each support, or hands out the one they already hold: a challenge that
+ * has not been attempted keeps its options, so buttons of an earlier offer stay valid after a
+ * re-offer. A support who attempted the ticket gets nothing, and neither does one who already has
+ * `MAX_OUTSTANDING_OFFERS` other open tickets waiting for an answer.
+ */
 async function issueChallenges(
   tx: Tx,
   ticketId: string,
   supports: { userId: string; discordId: string }[],
+  outstanding: Outstanding,
 ): Promise<OfferedChallenge[]> {
   const offered: OfferedChallenge[] = [];
   for (const s of supports) {
-    const challenge = makeChallenge();
-    const rows = await tx
+    const held = outstanding.get(s.userId) ?? new Set<string>();
+    if (!held.has(ticketId) && held.size >= MAX_OUTSTANDING_OFFERS) continue;
+    const fresh = makeChallenge();
+    const [created] = await tx
       .insert(ticketChallenges)
-      .values({ ticketId, userId: s.userId, answer: challenge.target, options: challenge.options })
-      .onConflictDoUpdate({
-        target: [ticketChallenges.ticketId, ticketChallenges.userId],
-        set: { answer: challenge.target, options: challenge.options },
-        setWhere: isNull(ticketChallenges.attemptedAt),
-      })
+      .values({ ticketId, userId: s.userId, answer: fresh.target, options: fresh.options })
+      .onConflictDoNothing()
       .returning({ userId: ticketChallenges.userId });
-    if (rows.length > 0) offered.push({ supportDiscordId: s.discordId, challenge });
+    let challenge = fresh;
+    if (!created) {
+      const [row] = await tx
+        .select()
+        .from(ticketChallenges)
+        .where(and(eq(ticketChallenges.ticketId, ticketId), eq(ticketChallenges.userId, s.userId)));
+      if (!row || row.attemptedAt) continue;
+      if (row.options.length === 4 && row.options.includes(row.answer)) {
+        challenge = { target: row.answer as ItemKey, options: row.options as ItemKey[] };
+      } else {
+        // A row from before options were stored cannot be shown; nothing was attempted, so replace it.
+        await tx
+          .update(ticketChallenges)
+          .set({ answer: fresh.target, options: fresh.options })
+          .where(
+            and(
+              eq(ticketChallenges.ticketId, ticketId),
+              eq(ticketChallenges.userId, s.userId),
+              isNull(ticketChallenges.attemptedAt),
+            ),
+          );
+      }
+    }
+    outstanding.set(s.userId, held.add(ticketId));
+    offered.push({ supportDiscordId: s.discordId, challenge });
   }
   return offered;
 }
@@ -195,7 +252,7 @@ export async function createTicket(
         category: TICKET_CATEGORY,
         description: message,
         createdAt: now,
-        offeredAt: supports.length > 0 ? now : null,
+        lastActivityAt: now,
       })
       .returning();
     await tx.insert(ticketMessages).values({
@@ -214,23 +271,31 @@ export async function createTicket(
       actorUserId: requester.id,
       createdAt: now,
     });
-    const challenges = await issueChallenges(tx, ticket!.id, supports);
+    const outstanding = await outstandingOffers(tx, config.guildId, supports.map((s) => s.userId));
+    const challenges = await issueChallenges(tx, ticket!.id, supports, outstanding);
+    // A ticket nobody could be offered to stays unmarked and waits for the next round.
+    let created = ticket!;
+    if (challenges.length > 0) {
+      created = (await tx.update(tickets).set({ offeredAt: now }).where(eq(tickets.id, created.id)).returning())[0]!;
+    }
     await writeAudit(tx, {
       guildId: config.guildId,
       actorUserId: requester.id,
       action: 'ticket.created',
-      data: { ticketId: ticket!.id, offeredTo: challenges.length },
+      data: { ticketId: created.id, offeredTo: challenges.length },
     });
-    return { ticket: ticket!, requesterDiscordId: requester.discordId, challenges };
+    return { ticket: created, requesterDiscordId: requester.discordId, challenges };
   });
 }
 
-export type ClaimResult = 'claimed' | 'wrong' | 'already_taken' | 'closed';
+export type ClaimResult = 'claimed' | 'wrong' | 'already_taken' | 'closed' | 'busy' | 'yours';
 
 /**
  * A support answers the check by the position (0 to 3) of the pressed option. One attempt per support per ticket: the attempt is spent before
  * the answer is compared. A correct first answer takes the ticket with one atomic
  * `UPDATE ... WHERE status = 'open'`, so of any number of parallel correct answers one wins.
+ * A support holds one claimed ticket at a time: with another one in work the answer is `busy`
+ * and the attempt is not spent. Pressing again on the ticket they hold gives `yours`.
  */
 export async function claimTicket(
   deps: TicketDeps,
@@ -243,11 +308,30 @@ export async function claimTicket(
   return db.transaction(async (tx) => {
     const [ticket] = await tx.select().from(tickets).where(eq(tickets.id, ticketId));
     if (!ticket || ticket.guildId !== config.guildId) throw new AppError('NOT_FOUND', 'Not found', 404);
-    if (ticket.status === 'closed') return { result: 'closed' as const };
-    if (ticket.status === 'claimed') return { result: 'already_taken' as const };
-
     const [support] = await tx.select().from(users).where(eq(users.discordId, supportDiscordId));
+    if (ticket.status === 'closed') return { result: 'closed' as const };
+    if (ticket.status === 'claimed') {
+      if (!support || ticket.claimedBy !== support.id) return { result: 'already_taken' as const };
+      const [req] = await tx
+        .select({ discordId: users.discordId })
+        .from(users)
+        .where(eq(users.id, ticket.requesterId));
+      return { result: 'yours' as const, ticket, requesterDiscordId: req!.discordId };
+    }
+
     if (!support) return { result: 'wrong' as const };
+    // Serializes the claims of one support, so two tickets cannot both be taken in parallel.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`claim:${config.guildId}:${support.id}`}, 0))`,
+    );
+    const [inWork] = await tx
+      .select({ id: tickets.id })
+      .from(tickets)
+      .where(
+        and(eq(tickets.guildId, config.guildId), eq(tickets.status, 'claimed'), eq(tickets.claimedBy, support.id)),
+      )
+      .limit(1);
+    if (inWork) return { result: 'busy' as const };
     const [attempt] = await tx
       .update(ticketChallenges)
       .set({ attemptedAt: now })
@@ -263,7 +347,7 @@ export async function claimTicket(
 
     const [claimed] = await tx
       .update(tickets)
-      .set({ status: 'claimed', claimedBy: support.id, claimedAt: now })
+      .set({ status: 'claimed', claimedBy: support.id, claimedAt: now, lastActivityAt: now })
       .where(and(eq(tickets.id, ticketId), eq(tickets.status, 'open')))
       .returning();
     if (!claimed) {
@@ -321,7 +405,18 @@ export async function addMessage(
     const isClaimer = !!author && author.id === ticket.claimedBy;
     if (!author || (!isRequester && !isClaimer)) throw new AppError('FORBIDDEN', 'Not allowed', 403);
     if (ticket.status === 'closed') throw conflict('The ticket is closed', 'ticket_closed');
+    if (isClaimer) {
+      // Access can be taken away while a ticket is in work; the claimer must still be staff now.
+      const [staff] = await tx
+        .select({ level: staffMembers.level, status: staffMembers.status })
+        .from(staffMembers)
+        .where(and(eq(staffMembers.guildId, config.guildId), eq(staffMembers.userId, author.id)));
+      if (!staff || staff.status !== 'active' || !atLeast(staff.level, 'SUPPORT')) {
+        throw new AppError('FORBIDDEN', 'Not allowed', 403, 'not_staff');
+      }
+    }
 
+    await tx.update(tickets).set({ lastActivityAt: now }).where(eq(tickets.id, ticketId));
     await tx.insert(ticketMessages).values({
       guildId: config.guildId,
       ticketId,
@@ -346,8 +441,15 @@ export async function addMessage(
   });
 }
 
-/** The transcript as plain text; names are real, times are in the configured timezone. */
-async function buildTranscript(tx: Tx, deps: TicketDeps, ticket: TicketRow): Promise<string> {
+/**
+ * The transcript as plain text; names are real, times are in the configured timezone. Lines after
+ * the first of a message are indented, so only a message header starts at column 0 with `[`.
+ */
+async function buildTranscript(
+  tx: Tx,
+  deps: TicketDeps,
+  ticket: TicketRow,
+): Promise<{ text: string; messageCount: number }> {
   const tz = deps.config.timezone;
   const name = (u: { displayName: string | null; username: string }) => u.displayName ?? u.username;
   const [requester] = await tx.select().from(users).where(eq(users.id, ticket.requesterId));
@@ -370,9 +472,10 @@ async function buildTranscript(tx: Tx, deps: TicketDeps, ticket: TicketRow): Pro
   ];
   for (const { m, u } of rows) {
     const who = u ? name(u) : m.authorDiscordId;
-    lines.push(`[${formatInZone(m.createdAt, tz)}] ${who}${m.isStaff ? ' (support)' : ''}: ${m.content}`);
+    const body = m.content.replace(/\r\n?|\n/g, '\n    ');
+    lines.push(`[${formatInZone(m.createdAt, tz)}] ${who}${m.isStaff ? ' (support)' : ''}: ${body}`);
   }
-  return lines.join('\n');
+  return { text: lines.join('\n'), messageCount: rows.length };
 }
 
 /**
@@ -384,7 +487,13 @@ export async function closeTicket(
   ticketId: string,
   actor: StaffActor,
   now: Date = new Date(),
-): Promise<{ ticket: TicketRow; transcript: string; requesterDiscordId: string }> {
+): Promise<{
+  ticket: TicketRow;
+  transcript: string;
+  messageCount: number;
+  requesterDiscordId: string;
+  claimerDiscordId: string | null;
+}> {
   const { db, config } = deps;
   return db.transaction(async (tx) => {
     const [current] = await tx
@@ -418,12 +527,204 @@ export async function closeTicket(
       action: 'ticket.closed',
       data: { ticketId, claimedBy: ticket.claimedBy },
     });
-    const transcript = await buildTranscript(tx, deps, ticket);
+    const { text, messageCount } = await buildTranscript(tx, deps, ticket);
     const [req] = await tx
       .select({ discordId: users.discordId })
       .from(users)
       .where(eq(users.id, ticket.requesterId));
-    return { ticket, transcript, requesterDiscordId: req!.discordId };
+    return {
+      ticket,
+      transcript: text,
+      messageCount,
+      requesterDiscordId: req!.discordId,
+      claimerDiscordId: await discordIdOf(tx, ticket.claimedBy),
+    };
+  });
+}
+
+const discordIdOf = async (tx: Tx, userId: string | null): Promise<string | null> =>
+  userId ? ((await tx.select({ discordId: users.discordId }).from(users).where(eq(users.id, userId)))[0]?.discordId ?? null) : null;
+
+/**
+ * Puts a claimed ticket back to `open` and makes it due for an offer at once (it counts as offered
+ * 5 minutes ago). The claimer keeps their spent attempt, so it is not offered to them again.
+ * Returns null when the ticket is not claimed any more.
+ */
+export async function releaseTx(
+  tx: Tx,
+  guildId: string,
+  ticket: TicketRow,
+  actorUserId: string | null,
+  reason: string,
+  now: Date,
+): Promise<TicketRow | null> {
+  const [released] = await tx
+    .update(tickets)
+    .set({
+      status: 'open',
+      claimedBy: null,
+      claimedAt: null,
+      offeredAt: new Date(now.getTime() - REOFFER_AFTER_MS),
+      lastActivityAt: now,
+    })
+    .where(and(eq(tickets.id, ticket.id), eq(tickets.status, 'claimed')))
+    .returning();
+  if (!released) return null;
+  await writeAudit(tx, {
+    guildId,
+    actorUserId,
+    action: 'ticket.released',
+    targetUserId: ticket.claimedBy ?? undefined,
+    reason,
+    data: { ticketId: ticket.id, claimedBy: ticket.claimedBy },
+  });
+  return released;
+}
+
+/** An ADMIN or above returns a claimed ticket to the queue; it is offered again. */
+export async function releaseTicket(
+  deps: TicketDeps,
+  ticketId: string,
+  actor: StaffActor,
+  now: Date = new Date(),
+): Promise<{ ticket: TicketRow; requesterDiscordId: string; claimerDiscordId: string | null }> {
+  const { db, config } = deps;
+  if (!atLeast(actor.level, 'ADMIN')) throw new AppError('FORBIDDEN', 'Not allowed', 403);
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(tickets)
+      .where(and(eq(tickets.id, ticketId), eq(tickets.guildId, config.guildId)))
+      .for('update');
+    if (!current) throw new AppError('NOT_FOUND', 'Not found', 404);
+    if (current.status !== 'claimed') throw conflict('The ticket is not claimed', 'not_claimed');
+    const claimerDiscordId = await discordIdOf(tx, current.claimedBy);
+    const ticket = await releaseTx(tx, config.guildId, current, actor.userId, 'released_by_admin', now);
+    if (!ticket) throw conflict('The ticket is not claimed', 'not_claimed');
+    return { ticket, requesterDiscordId: (await discordIdOf(tx, ticket.requesterId))!, claimerDiscordId };
+  });
+}
+
+/** Releases every ticket a deactivated or removed support had in work. */
+export async function releaseClaimedBy(tx: Tx, guildId: string, userId: string, now: Date): Promise<void> {
+  const held = await tx
+    .select()
+    .from(tickets)
+    .where(and(eq(tickets.guildId, guildId), eq(tickets.status, 'claimed'), eq(tickets.claimedBy, userId)))
+    .for('update');
+  for (const t of held) await releaseTx(tx, guildId, t, null, 'claimer_deactivated', now);
+}
+
+/**
+ * The requester withdraws a ticket nobody has taken. A claimed ticket is closed by the support, a
+ * closed one stays closed; both are reported, nothing changes.
+ */
+export async function cancelTicket(
+  deps: TicketDeps,
+  ticketId: string,
+  requesterDiscordId: string,
+  now: Date = new Date(),
+): Promise<{ result: 'cancelled' | 'claimed' | 'closed' }> {
+  const { db, config } = deps;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ ticket: tickets, discordId: users.discordId })
+      .from(tickets)
+      .innerJoin(users, eq(users.id, tickets.requesterId))
+      .where(and(eq(tickets.id, ticketId), eq(tickets.guildId, config.guildId)))
+      .for('update', { of: tickets });
+    if (!row) throw new AppError('NOT_FOUND', 'Not found', 404);
+    if (row.discordId !== requesterDiscordId) throw new AppError('FORBIDDEN', 'Not allowed', 403);
+    if (row.ticket.status === 'closed') return { result: 'closed' as const };
+    if (row.ticket.status === 'claimed') return { result: 'claimed' as const };
+    await tx
+      .update(tickets)
+      .set({ status: 'closed', closedAt: now, closedBy: row.ticket.requesterId, lastActivityAt: now })
+      .where(eq(tickets.id, ticketId));
+    await tx.insert(ticketEvents).values({
+      guildId: config.guildId,
+      ticketId,
+      type: 'closed',
+      actorUserId: row.ticket.requesterId,
+      data: { cancelled: true },
+      createdAt: now,
+    });
+    await writeAudit(tx, {
+      guildId: config.guildId,
+      actorUserId: row.ticket.requesterId,
+      action: 'ticket.cancelled',
+      data: { ticketId },
+    });
+    return { result: 'cancelled' as const };
+  });
+}
+
+export interface ExpiredTicket {
+  ticketId: string;
+  requesterDiscordId: string;
+  claimerDiscordId: string | null;
+  transcript: string;
+  messageCount: number;
+}
+
+/**
+ * Closes open and claimed tickets with no message, claim or release for 24 hours, up to `limit`
+ * at a time. Nobody is credited for the close (`closed_by` stays empty). Returns what the bot
+ * needs to tell both sides and to write the transcript to the log.
+ */
+export async function expireStaleTickets(
+  deps: TicketDeps,
+  now: Date = new Date(),
+  limit = 20,
+): Promise<ExpiredTicket[]> {
+  const { db, config } = deps;
+  return db.transaction(async (tx) => {
+    const stale = await tx
+      .select()
+      .from(tickets)
+      .where(
+        and(
+          eq(tickets.guildId, config.guildId),
+          ne(tickets.status, 'closed'),
+          lte(tickets.lastActivityAt, new Date(now.getTime() - IDLE_CLOSE_AFTER_MS)),
+        ),
+      )
+      .orderBy(asc(tickets.lastActivityAt))
+      .limit(limit)
+      .for('update', { skipLocked: true });
+    const out: ExpiredTicket[] = [];
+    for (const t of stale) {
+      const [ticket] = await tx
+        .update(tickets)
+        .set({ status: 'closed', closedAt: now, closedBy: null })
+        .where(and(eq(tickets.id, t.id), ne(tickets.status, 'closed')))
+        .returning();
+      if (!ticket) continue;
+      await tx.insert(ticketEvents).values({
+        guildId: config.guildId,
+        ticketId: t.id,
+        type: 'closed',
+        actorUserId: null,
+        data: { reason: 'inactive' },
+        createdAt: now,
+      });
+      await writeAudit(tx, {
+        guildId: config.guildId,
+        actorUserId: null,
+        action: 'ticket.expired',
+        reason: 'inactive_24h',
+        data: { ticketId: t.id, claimedBy: t.claimedBy },
+      });
+      const { text, messageCount } = await buildTranscript(tx, deps, ticket);
+      out.push({
+        ticketId: t.id,
+        requesterDiscordId: (await discordIdOf(tx, t.requesterId))!,
+        claimerDiscordId: await discordIdOf(tx, t.claimedBy),
+        transcript: text,
+        messageCount,
+      });
+    }
+    return out;
   });
 }
 
@@ -476,14 +777,22 @@ export interface DueTicket {
 /**
  * Open tickets to offer now: offered over 5 minutes ago, or never offered (nobody was on duty)
  * while someone is on duty now. Marks `offered_at` (under a row lock with SKIP LOCKED, so parallel
- * workers get different tickets) and returns fresh challenges for the supports on duty who have
- * not attempted that ticket. A ticket with nobody to offer to stays unmarked.
+ * workers get different tickets) and returns the challenges for the supports on duty who have
+ * not attempted that ticket: a challenge they already hold is returned unchanged, so a lost
+ * round is repaired by the next re-offer. A round has at most `limit` tickets and no support gets
+ * more than `MAX_OUTSTANDING_OFFERS` open tickets to answer. A ticket with nobody to offer to
+ * stays unmarked.
  */
-export async function dueTickets(deps: TicketDeps, now: Date = new Date()): Promise<DueTicket[]> {
+export async function dueTickets(
+  deps: TicketDeps,
+  now: Date = new Date(),
+  limit = DUE_PER_ROUND,
+): Promise<DueTicket[]> {
   const { db, config } = deps;
   return db.transaction(async (tx) => {
     const supports = await onDutySupports(tx, deps, now);
     if (supports.length === 0) return [];
+    const outstanding = await outstandingOffers(tx, config.guildId, supports.map((s) => s.userId));
     const candidates = await tx
       .select({ ticket: tickets, requesterDiscordId: users.discordId })
       .from(tickets)
@@ -496,12 +805,14 @@ export async function dueTickets(deps: TicketDeps, now: Date = new Date()): Prom
         ),
       )
       .orderBy(asc(tickets.createdAt))
+      .limit(DUE_SCAN_LIMIT)
       .for('update', { of: tickets, skipLocked: true });
 
     const due: DueTicket[] = [];
     for (const { ticket, requesterDiscordId } of candidates) {
+      if (due.length >= limit) break;
       const eligible = supports.filter((s) => s.userId !== ticket.requesterId);
-      const challenges = await issueChallenges(tx, ticket.id, eligible);
+      const challenges = await issueChallenges(tx, ticket.id, eligible, outstanding);
       if (challenges.length === 0) continue;
       await tx.update(tickets).set({ offeredAt: now }).where(eq(tickets.id, ticket.id));
       const reoffer = ticket.offeredAt !== null;
@@ -539,18 +850,24 @@ export async function activeTicket(
   const { db, config } = deps;
   const [user] = await db.select().from(users).where(eq(users.discordId, discordId));
   if (!user) return null;
-  const [t] = await db
+  // The ticket a person claimed comes first: their own open question must not take its place.
+  const [inWork] = await db
     .select()
     .from(tickets)
-    .where(
-      and(
-        eq(tickets.guildId, config.guildId),
-        ne(tickets.status, 'closed'),
-        or(eq(tickets.requesterId, user.id), eq(tickets.claimedBy, user.id)),
-      ),
-    )
-    .orderBy(desc(tickets.createdAt))
+    .where(and(eq(tickets.guildId, config.guildId), eq(tickets.status, 'claimed'), eq(tickets.claimedBy, user.id)))
+    .orderBy(desc(tickets.claimedAt))
     .limit(1);
+  const [own] = inWork
+    ? []
+    : await db
+        .select()
+        .from(tickets)
+        .where(
+          and(eq(tickets.guildId, config.guildId), ne(tickets.status, 'closed'), eq(tickets.requesterId, user.id)),
+        )
+        .orderBy(desc(tickets.createdAt))
+        .limit(1);
+  const t = inWork ?? own;
   if (!t) return null;
   const role = t.requesterId === user.id ? 'requester' : 'support';
   const otherId = role === 'requester' ? t.claimedBy : t.requesterId;

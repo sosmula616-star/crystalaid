@@ -48,8 +48,11 @@ export type CreateTicketResponse = z.infer<typeof CreateTicketResponse>;
 export const ClaimRequest = z.object({ ...Actor, choiceIndex: z.number().int().min(0).max(3) });
 export type ClaimRequest = z.infer<typeof ClaimRequest>;
 export const ClaimResponse = z.object({
-  result: z.enum(['claimed', 'wrong', 'already_taken', 'closed']),
+  /** usy: the support already has a claimed ticket (the attempt is not spent). yours: they claimed this one already. */
+  result: z.enum(['claimed', 'wrong', 'already_taken', 'closed', 'busy', 'yours']),
   requesterDiscordId: DiscordId.optional(),
+  /** The question of the ticket, for claimed and yours. */
+  description: z.string().optional(),
 });
 export type ClaimResponse = z.infer<typeof ClaimResponse>;
 
@@ -69,9 +72,48 @@ export const CloseRequest = z.object({ ...Actor });
 export const CloseResponse = z.object({
   ticketId: TicketId,
   requesterDiscordId: DiscordId,
+  claimerDiscordId: DiscordId.nullable(),
   transcript: z.string(),
+  messageCount: z.number().int(),
 });
 export type CloseResponse = z.infer<typeof CloseResponse>;
+
+export const CancelRequest = z.object({ ...Actor });
+export const CancelResponse = z.object({ result: z.enum(['cancelled', 'claimed', 'closed']) });
+export type CancelResponse = z.infer<typeof CancelResponse>;
+
+export const ReleaseRequest = z.object({ ...Actor });
+export const ReleaseResponse = z.object({
+  ticketId: TicketId,
+  requesterDiscordId: DiscordId,
+  claimerDiscordId: DiscordId.nullable(),
+});
+export type ReleaseResponse = z.infer<typeof ReleaseResponse>;
+
+/** Tickets closed by the API because nothing happened in them for 24 hours. */
+export const ExpiredTicketsResponse = z.object({
+  items: z.array(
+    z.object({
+      ticketId: TicketId,
+      requesterDiscordId: DiscordId,
+      claimerDiscordId: DiscordId.nullable(),
+      transcript: z.string(),
+      messageCount: z.number().int(),
+    }),
+  ),
+});
+export type ExpiredTicketsResponse = z.infer<typeof ExpiredTicketsResponse>;
+
+export const DeliveryFailureRequest = z.object({
+  targetDiscordId: DiscordId,
+  what: z.string().trim().min(1).max(200),
+  code: z.number().int().nullable().optional(),
+});
+export type DeliveryFailureRequest = z.infer<typeof DeliveryFailureRequest>;
+export const DeliveryFailuresResponse = z.object({
+  items: z.array(z.object({ at: IsoDate, discordId: z.string(), what: z.string(), code: z.number().int().nullable() })),
+});
+export type DeliveryFailuresResponse = z.infer<typeof DeliveryFailuresResponse>;
 
 export const RatingRequest = z.object({ ...Actor, rating: z.number().int().min(1).max(5) });
 export type RatingRequest = z.infer<typeof RatingRequest>;
@@ -109,8 +151,10 @@ export type PtSlotRequest = z.infer<typeof PtSlotRequest>;
 export const PtSlotQuery = PtSlotRequest;
 const PtSlotItem = z.object({ startsAt: IsoDate, discordId: DiscordId, username: z.string() });
 export const PtListResponse = z.object({ items: z.array(PtSlotItem) });
-export const PtRemindersResponse = z.object({ items: z.array(PtSlotItem) });
+/** A reminder is marked as sent only by ReminderConfirmRequest, after the DM went out. */
+export const PtRemindersResponse = z.object({ items: z.array(PtSlotItem.extend({ slotId: z.uuid() })) });
 export type PtRemindersResponse = z.infer<typeof PtRemindersResponse>;
+export const ReminderConfirmRequest = z.object({ slotId: z.uuid() });
 
 export const MenuSettingsPatchRequest = z.object({ ...Actor, patch: SettingsPatch });
 

@@ -5,7 +5,7 @@ import { PERMISSIONS, type Permission } from '@crystalaid/domain';
 import { ApiError, type ApiClient } from './api.js';
 import type { MenuResult, MenuRow, MenuView, ModalSpec } from './ports.js';
 import { shortId } from './text.js';
-import { addDays, localDate, localHour, parseTypedDate, showDate, zonedHour } from './zone.js';
+import { addDays, localDate, localHour, parseTypedDate, showDate, stamp, zonedHour } from './zone.js';
 
 // The menu keeps no authority. A custom id names a session and an action, nothing more; the person
 // who acts is always the one in the interaction, and the API checks their level on every call.
@@ -53,11 +53,19 @@ type MenuApi = Pick<
   | 'permissions'
   | 'patchPermissions'
   | 'openTickets'
+  | 'deliveryFailures'
   | 'diagnostics'
 >;
 
+/** What the ticket buttons do. The handlers do the work and the messages; they give the note to show. */
+export interface TicketOps {
+  close(ticketId: string, actorId: string, actorName?: string): Promise<string>;
+  release(ticketId: string, actorId: string, actorName?: string): Promise<string>;
+}
+
 export interface MenuDeps {
   api: MenuApi;
+  tickets?: TicketOps;
   config: Pick<ServerConfig, 'timezone'>;
   now?: () => number;
   newSid?: () => string;
@@ -73,9 +81,14 @@ interface Session {
   page: number;
   /** The person picked in the user select, waiting for an hour. */
   sel: string | null;
+  /** The ticket picked in the open tickets list. */
+  ticket: string | null;
+  /** The settings last shown; the edit form opens from them, without asking the API (3 seconds). */
+  settings: Settings | null;
 }
 
 const CID = /^m:([0-9a-f]{8}):([a-z-]+)$/;
+const TICKET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MODAL_ACTIONS = new Set(['pt-date', 'settings-edit']);
 
 /** True when the component answers with a modal, which must be shown instead of deferring. */
@@ -120,7 +133,16 @@ export function createMenu(deps: MenuDeps) {
     for (const [k, s] of sessions) if (now() - s.seen > SESSION_TTL_MS) sessions.delete(k);
     while (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value!);
     const sid = newSid();
-    sessions.set(sid, { owner, kind, seen: now(), date: localDate(new Date(now()), tz), page: 0, sel: null });
+    sessions.set(sid, {
+      owner,
+      kind,
+      seen: now(),
+      date: localDate(new Date(now()), tz),
+      page: 0,
+      sel: null,
+      ticket: null,
+      settings: null,
+    });
     return sid;
   }
 
@@ -139,6 +161,7 @@ export function createMenu(deps: MenuDeps) {
         { id: cid(sid, 'settings'), label: 'Настройки', style: 'primary' },
         { id: cid(sid, 'permissions'), label: 'Права', style: 'primary' },
         { id: cid(sid, 'tickets'), label: 'Открытые тикеты', style: 'primary' },
+        { id: cid(sid, 'delivery'), label: 'Ошибки доставки', style: 'primary' },
       );
     }
     return { text: '**Меню CrystalAid**\nВыберите раздел.', rows: [{ kind: 'buttons', buttons }] };
@@ -250,7 +273,7 @@ export function createMenu(deps: MenuDeps) {
     };
   }
 
-  async function ticketsView(sid: string, actor: string): Promise<MenuView> {
+  async function ticketsView(sid: string, s: Session, actor: string, notice?: string): Promise<MenuView> {
     const { items, total } = await api.openTickets(actor);
     const lines = items.map(
       (t) =>
@@ -258,12 +281,56 @@ export function createMenu(deps: MenuDeps) {
         (t.claimerUsername ? esc(t.claimerUsername, 32) : 'не взят'),
     );
     const more = total > items.length ? `\n…и ещё ${total - items.length}` : '';
+    const picked = items.find((t) => t.ticketId === s.ticket);
+    if (!picked) s.ticket = null;
+    const parts = [
+      notice ? notice.slice(0, 300) : null,
+      `**Открытые тикеты** (${total})\n${lines.join('\n') || 'Открытых тикетов нет.'}${more}`,
+      picked ? `Выбран: #${shortId(picked.ticketId)}.` : items.length ? 'Выберите тикет, чтобы закрыть его или вернуть в очередь.' : null,
+    ];
+    const rows: MenuRow[] = [];
+    if (items.length) {
+      rows.push({
+        kind: 'select',
+        id: cid(sid, 'ticket-pick'),
+        placeholder: 'Тикет',
+        min: 1,
+        max: 1,
+        options: items.map((t) => ({
+          label: `#${shortId(t.ticketId)} — ${t.status === 'claimed' ? 'в работе' : 'ожидает'}`,
+          value: t.ticketId,
+          default: t.ticketId === picked?.ticketId,
+        })),
+      });
+    }
+    rows.push({
+      kind: 'buttons',
+      buttons: [
+        { id: cid(sid, 'ticket-close'), label: 'Закрыть', style: 'danger', disabled: !picked },
+        {
+          id: cid(sid, 'ticket-release'),
+          label: 'Вернуть в очередь',
+          style: 'secondary',
+          disabled: picked?.status !== 'claimed',
+        },
+        { id: cid(sid, 'tickets'), label: 'Обновить', style: 'secondary' },
+        back(sid),
+      ],
+    });
+    return { text: cap(parts.filter(Boolean).join('\n')), rows };
+  }
+
+  async function deliveryView(sid: string, actor: string): Promise<MenuView> {
+    const { items } = await api.deliveryFailures(actor);
+    const lines = items.map(
+      (f) => `• ${stamp(f.at, tz)} — <@${f.discordId}> — ${esc(f.what, 60)}${f.code ? ` (код ${f.code})` : ''}`,
+    );
     return {
-      text: cap(`**Открытые тикеты** (${total})\n${lines.join('\n') || 'Открытых тикетов нет.'}${more}`),
+      text: cap(`**Ошибки доставки** (последние ${items.length})\n${lines.join('\n') || 'Ошибок доставки нет.'}`),
       rows: [
         {
           kind: 'buttons',
-          buttons: [{ id: cid(sid, 'tickets'), label: 'Обновить', style: 'secondary' }, back(sid)],
+          buttons: [{ id: cid(sid, 'delivery'), label: 'Обновить', style: 'secondary' }, back(sid)],
         },
       ],
     };
@@ -333,6 +400,7 @@ export function createMenu(deps: MenuDeps) {
   /** Every button, select and modal submit of a menu message. */
   async function interact(ix: {
     userId: string;
+    username?: string;
     customId: string;
     values?: string[];
     fields?: Record<string, string>;
@@ -393,8 +461,10 @@ export function createMenu(deps: MenuDeps) {
           if (!Number.isInteger(h) || h < 0 || h > 23) return { note: FAILED };
           if (!s.sel) return { view: await ptView(sid, s, 'Сначала выберите сотрудника.') };
           const hh = String(h).padStart(2, '0');
+          const startsAt = zonedHour(s.date, h, tz);
+          if (!startsAt) return { view: await ptView(sid, s, `Часа ${hh}:00 в этот день нет: часы переводятся вперёд.`) };
           try {
-            await api.ptSet(actor, zonedHour(s.date, h, tz).toISOString(), s.sel);
+            await api.ptSet(actor, startsAt.toISOString(), s.sel);
           } catch (err) {
             if (err instanceof ApiError && err.reason === 'not_staff') {
               return { view: await ptView(sid, s, 'Этот пользователь не состоит в ветке поддержки.') };
@@ -408,8 +478,10 @@ export function createMenu(deps: MenuDeps) {
           const h = r ? Number(r[1]) : -1;
           if (!r || h < 0 || h > 23) return { note: FAILED };
           let notice = `Снято: <@${r[2]}> с ${String(h).padStart(2, '0')}:00.`;
+          const startsAt = zonedHour(s.date, h, tz);
+          if (!startsAt) return { view: await ptView(sid, s, 'Этого часа в этот день нет.') };
           try {
-            await api.ptRemove(actor, zonedHour(s.date, h, tz).toISOString(), r[2]!);
+            await api.ptRemove(actor, startsAt.toISOString(), r[2]!);
           } catch (err) {
             if (err instanceof ApiError && err.status === 404) notice = 'Этот сотрудник уже снят с часа.';
             else throw err;
@@ -417,11 +489,13 @@ export function createMenu(deps: MenuDeps) {
           return { view: await ptView(sid, s, notice) };
         }
         case 'settings':
-          return { view: settingsView(sid, await api.settings(actor)) };
+          s.settings = await api.settings(actor);
+          return { view: settingsView(sid, s.settings) };
         case 'settings-edit':
-          return { modal: settingsModal(sid, await api.settings(actor)) };
+          // Discord gives 3 seconds to open a modal: it shows what the settings view showed, with no API call.
+          return s.settings ? { modal: settingsModal(sid, s.settings) } : { note: STALE };
         case 'settings-modal':
-          return settingsSubmit(sid, actor, ix.fields ?? {});
+          return settingsSubmit(sid, s, actor, ix.fields ?? {});
         case 'permissions':
           return { view: permissionsView(sid, await api.permissions(actor)) };
         case 'perm-support':
@@ -431,7 +505,27 @@ export function createMenu(deps: MenuDeps) {
           return { view: permissionsView(sid, await api.patchPermissions(actor, level, grants), 'Права сохранены.') };
         }
         case 'tickets':
-          return { view: await ticketsView(sid, actor) };
+          return { view: await ticketsView(sid, s, actor) };
+        case 'ticket-pick': {
+          const t = v[0] ?? '';
+          if (!TICKET_ID.test(t)) return { note: FAILED };
+          s.ticket = t;
+          return { view: await ticketsView(sid, s, actor) };
+        }
+        case 'ticket-close':
+        case 'ticket-release': {
+          const t = s.ticket;
+          if (!t) return { view: await ticketsView(sid, s, actor, 'Сначала выберите тикет.') };
+          if (!deps.tickets) return { note: FAILED };
+          s.ticket = null;
+          const note =
+            action === 'ticket-close'
+              ? await deps.tickets.close(t, actor, ix.username)
+              : await deps.tickets.release(t, actor, ix.username);
+          return { view: await ticketsView(sid, s, actor, note) };
+        }
+        case 'delivery':
+          return { view: await deliveryView(sid, actor) };
         default:
           return { note: STALE };
       }
@@ -460,7 +554,12 @@ export function createMenu(deps: MenuDeps) {
     };
   }
 
-  async function settingsSubmit(sid: string, actor: string, fields: Record<string, string>): Promise<MenuResult> {
+  async function settingsSubmit(
+    sid: string,
+    s: Session,
+    actor: string,
+    fields: Record<string, string>,
+  ): Promise<MenuResult> {
     const patch: Record<string, number> = {};
     const problems: string[] = [];
     for (const f of SETTING_FIELDS) {
@@ -474,14 +573,16 @@ export function createMenu(deps: MenuDeps) {
     }
     // The current values are shown again whatever happens; the API also rejects bad values.
     if (problems.length) {
-      return { view: settingsView(sid, await api.settings(actor), `Не сохранено:\n${problems.join('\n')}`) };
+      s.settings = await api.settings(actor);
+      return { view: settingsView(sid, s.settings, `Не сохранено:\n${problems.join('\n')}`) };
     }
     try {
-      const saved = await api.patchSettings(actor, patch as SettingsPatch);
-      return { view: settingsView(sid, saved, 'Настройки сохранены.') };
+      s.settings = await api.patchSettings(actor, patch as SettingsPatch);
+      return { view: settingsView(sid, s.settings, 'Настройки сохранены.') };
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
-        return { view: settingsView(sid, await api.settings(actor), `Не сохранено: ${err.message.slice(0, 200)}`) };
+        s.settings = await api.settings(actor);
+        return { view: settingsView(sid, s.settings, `Не сохранено: ${err.message.slice(0, 200)}`) };
       }
       throw err;
     }

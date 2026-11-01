@@ -25,12 +25,26 @@ const offsetMs = (date: Date, tz: string): number => {
   return Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second!) - Math.floor(date.getTime() / 1000) * 1000;
 };
 
-/** The instant at which the wall clock of `tz` shows `date` (YYYY-MM-DD) at `hour`:00. */
-export function zonedHour(date: string, hour: number, tz: string): Date {
+/**
+ * The instant at which the wall clock of `tz` shows `date` (YYYY-MM-DD) at `hour`:00, or null when
+ * that hour does not exist (the hour skipped when the clocks go forward). An hour that happens twice
+ * (clocks going back) gives the first of the two. A zone without DST, like Europe/Moscow, has one answer.
+ */
+export function zonedHour(date: string, hour: number, tz: string): Date | null {
   const [y, mo, d] = date.split('-').map(Number) as [number, number, number];
   const guess = Date.UTC(y, mo - 1, d, hour);
-  const first = guess - offsetMs(new Date(guess), tz);
-  return new Date(guess - offsetMs(new Date(first), tz));
+  const DAY = 86_400_000;
+  // The offsets before and after any change within the day; the one that round-trips is right.
+  const offsets = new Set([offsetMs(new Date(guess - DAY), tz), offsetMs(new Date(guess + DAY), tz)]);
+  let best: Date | null = null;
+  for (const off of offsets) {
+    const t = new Date(guess - off);
+    const p = parts(t, tz);
+    if (p.year === y && p.month === mo && p.day === d && p.hour === hour && p.minute === 0 && (!best || t < best)) {
+      best = t;
+    }
+  }
+  return best;
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0');
@@ -39,6 +53,12 @@ const pad = (n: number): string => String(n).padStart(2, '0');
 export function localDate(now: Date, tz: string): string {
   const p = parts(now, tz);
   return `${p.year}-${pad(p.month!)}-${pad(p.day!)}`;
+}
+
+/** `ДД.ММ ЧЧ:ММ` of an instant on the wall clock of `tz`. */
+export function stamp(iso: string, tz: string): string {
+  const p = parts(new Date(iso), tz);
+  return `${pad(p.day!)}.${pad(p.month!)} ${pad(p.hour!)}:${pad(p.minute!)}`;
 }
 
 /** The local hour (0 to 23) of an instant. */

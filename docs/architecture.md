@@ -1,11 +1,11 @@
 # Архитектура
 
-Реализовано ядро: HTTP API и worker, который применяет события Discord. Activity есть (`apps/activity`), бота пока нет; роль бота описана ниже как контракт.
+Реализовано ядро: HTTP API и worker, который применяет события Discord. Activity есть (`apps/activity`) и бот (`apps/bot`): тикеты в личных сообщениях, ПТ, `/menu` и `/dev` (см. [спецификацию бота](superpowers/specs/2026-11-01-crystalaid-bot-tickets-design.md)). Бот не ходит в базу, всю логику ведёт API через `/internal/*`; события состава бот кладёт в Redis, как описано ниже.
 
 ## Процессы
 
 ```
-Бот (не реализован)                Activity (реализована)
+Бот (apps/bot)                     Activity (реализована)
    |  XADD events:bot                  |  POST /auth/activity, Bearer JWT
    v                                   v
  Redis 5+ ------------------------> API (Fastify) -----> PostgreSQL

@@ -125,6 +125,8 @@ export const tickets = pgTable(
     // Last time the ticket was offered to supports; null while nobody was on duty.
     offeredAt: ts('offered_at'),
     firstResponseAt: ts('first_response_at'),
+    // Last message, claim or release; a ticket idle for 24 hours is closed by the scheduler.
+    lastActivityAt: ts('last_activity_at').notNull().defaultNow(),
     closedAt: ts('closed_at'),
     closedBy: optUserRef('closed_by'),
     result: text('result'),

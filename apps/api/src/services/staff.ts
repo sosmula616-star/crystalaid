@@ -6,6 +6,7 @@ import { resolveLevel } from '@crystalaid/domain';
 import { careerEvents, staffMembers, users, type Db } from '@crystalaid/database';
 import type { Logger } from '../log.js';
 import { writeAudit, type Tx } from './audit.js';
+import { releaseClaimedBy } from './tickets.js';
 
 export type StaffMember = typeof staffMembers.$inferSelect;
 export type SnapshotEvent = Extract<BotEvent, { type: 'member.snapshot' }>;
@@ -61,6 +62,8 @@ async function deactivate(
     reason,
     data: { level: staff.level, ...(supportRoleMissing ? { supportRoleMissing } : {}) },
   });
+  // A ticket in work must not stay with someone who has no access: it goes back to the queue.
+  await releaseClaimedBy(tx, staff.guildId, staff.userId, at);
   return row!;
 }
 

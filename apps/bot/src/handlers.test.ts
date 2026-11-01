@@ -20,7 +20,14 @@ beforeEach(async () => {
   discord = new FakeDiscord();
   store = new MemoryStore();
   errors = [];
-  h = createHandlers({ api: api.client(), discord, store, config: CFG, onError: (e) => errors.push(e) });
+  h = createHandlers({
+    api: api.client(),
+    discord,
+    store,
+    config: CFG,
+    onError: (e) => errors.push(e),
+    sleep: async () => {},
+  });
 });
 afterEach(() => api.stop());
 
@@ -44,6 +51,7 @@ function button(userId: string) {
     notes,
     ctx: {
       userId,
+      username: 'support_a',
       update: async (m: OutMessage) => void updates.push(m),
       notify: async (t: string) => void notes.push(t),
     },
@@ -85,7 +93,6 @@ describe('/help', () => {
       expect(parseButton(b.id)).toEqual({ kind: 'claim', ticketId: TICKET, index: i });
     }
     expect(discord.dmsTo(SUPPORT_B)[0]!.msg.text).toContain('ключ');
-    expect(store.metas.get(TICKET)).toEqual({ description: 'как вступить?' });
     expect(store.offerMap.get(TICKET)).toHaveLength(2);
     expect(discord.logText()).toContain('Создан тикет #11111111');
     expect(discord.logText()).toContain('предложен');
@@ -118,7 +125,7 @@ describe('/help', () => {
     const r = replies();
     await h.handleHelpSubmit({ userId: REQUESTER, username: 'a', text: 'q', ...r });
     expect(r.out[0]).toContain('Откройте личные сообщения');
-    expect(discord.logText()).toContain(`Не удалось доставить ЛС <@${REQUESTER}>`);
+    expect(discord.logText()).toContain(`Не удалось доставить ЛС a (${REQUESTER})`);
     // The offers still go out.
     expect(discord.dmsTo(SUPPORT_A)).toHaveLength(1);
   });
@@ -137,21 +144,23 @@ describe('DM failure wrapper', () => {
 
   it('keeps going when a support has closed DMs', async () => {
     discord.closedDms.add(SUPPORT_A);
-    await h.offer(TICKET, 'q', offered());
+    await h.offer(TICKET, offered());
     expect(discord.dmsTo(SUPPORT_B)).toHaveLength(1);
     expect(store.offerMap.get(TICKET)).toHaveLength(1);
-    expect(discord.logText()).toContain(`<@${SUPPORT_A}>`);
+    expect(discord.logText()).toContain(SUPPORT_A);
   });
 });
 
 describe('claim', () => {
   beforeEach(async () => {
-    await h.offer(TICKET, 'мой вопрос', offered());
+    await h.offer(TICKET, offered());
     discord.logs = [];
   });
 
   it('claimed: shows the question and a close button, informs the user, logs, and closes other offers', async () => {
-    api.on('POST /internal/tickets/:id/claim', () => ({ json: { result: 'claimed', requesterDiscordId: REQUESTER } }));
+    api.on('POST /internal/tickets/:id/claim', () => ({
+      json: { result: 'claimed', requesterDiscordId: REQUESTER, description: 'мой вопрос' },
+    }));
     const b = button(SUPPORT_A);
     await h.handleClaim({ ...b.ctx, ticketId: TICKET, index: 1 });
 
@@ -159,7 +168,7 @@ describe('claim', () => {
     expect(b.updates[0]!.text).toContain('мой вопрос');
     expect(b.updates[0]!.buttons).toEqual([{ id: `close:${TICKET}`, label: 'Закрыть тикет' }]);
     expect(discord.dmsTo(REQUESTER).at(-1)!.msg.text).toContain('подключился сотрудник поддержки');
-    expect(discord.logText()).toContain(`принят: <@${SUPPORT_A}>`);
+    expect(discord.logText()).toContain(`принят: support\\_a (${SUPPORT_A})`);
     // Only the other support's offer is edited.
     expect(discord.edits).toHaveLength(1);
     expect(discord.edits[0]!.ref.channelId).toBe(`dm-${SUPPORT_B}`);
@@ -196,16 +205,21 @@ describe('claim', () => {
 });
 
 describe('relay', () => {
-  const dmFrom = (authorId: string, content: string, extra: { urls?: string[]; bot?: boolean } = {}) => {
+  const dmFrom = (
+    authorId: string,
+    content: string,
+    extra: { files?: { url: string; name: string; size: number }[]; bot?: boolean } = {},
+  ) => {
     const r = replies();
     return {
       r,
       run: () =>
         h.handleDm({
           authorId,
+          username: 'someone',
           isBot: extra.bot ?? false,
           content,
-          attachmentUrls: extra.urls ?? [],
+          attachments: extra.files ?? [],
           messageId: 'msg1',
           reply: r.reply,
         }),
@@ -217,9 +231,12 @@ describe('relay', () => {
       json: { ticket: { ticketId: TICKET, status: 'claimed', role: 'support', counterpartDiscordId: REQUESTER } },
     }));
     api.on('POST /internal/tickets/:id/messages', () => ({ json: { isStaff: true, recipientDiscordId: REQUESTER } }));
-    await dmFrom(SUPPORT_A, 'Здравствуйте', { urls: ['https://cdn.example/a.png'] }).run();
+    await dmFrom(SUPPORT_A, 'Здравствуйте', { files: [{ url: 'https://cdn.example/a.png', name: 'a.png', size: 1000 }] }).run();
     const saved = api.called('POST /internal/tickets/:id/messages')[0]!.body as { content: string; discordMessageId: string };
-    expect(saved.content).toBe('Здравствуйте\nВложение: https://cdn.example/a.png');
+    // The copy in the log channel is what the transcript keeps; the other side gets the original link.
+    expect(saved.content).toBe(
+      `Здравствуйте\nВложение: a.png — https://discord.com/channels/${CFG.guildId}/${CFG.channels.log}/archive1`,
+    );
     expect(saved.discordMessageId).toBe('msg1');
     expect(discord.dmsTo(REQUESTER)[0]!.msg.text).toBe('Поддержка: Здравствуйте\nВложение: https://cdn.example/a.png');
   });
@@ -285,6 +302,8 @@ describe('close and rating', () => {
         ticketId: TICKET,
         requesterDiscordId: REQUESTER,
         transcript: 'Ticket x\n\n[10:00] user: hi\n[10:01] sup (support): hello',
+        messageCount: 2,
+        claimerDiscordId: SUPPORT_A,
       },
     }));
     const b = button(SUPPORT_A);
@@ -311,7 +330,7 @@ describe('close and rating', () => {
 
   it('close still logs the transcript when the user has closed DMs', async () => {
     api.on('POST /internal/tickets/:id/close', () => ({
-      json: { ticketId: TICKET, requesterDiscordId: REQUESTER, transcript: 't' },
+      json: { ticketId: TICKET, requesterDiscordId: REQUESTER, transcript: 't', messageCount: 0, claimerDiscordId: null },
     }));
     discord.closedDms.add(REQUESTER);
     await h.handleClose({ ...button(SUPPORT_A).ctx, ticketId: TICKET });
@@ -340,5 +359,251 @@ describe('log failures', () => {
     await h.handleHelpSubmit({ userId: REQUESTER, username: 'a', text: 'q', ...r });
     expect(r.out[0]).toContain('#11111111');
     expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('one ticket at a time and a second press (C1, I1)', () => {
+  beforeEach(async () => {
+    await h.offer(TICKET, offered());
+    discord.logs = [];
+  });
+
+  it('busy: asks to close the current ticket and keeps the offer alive', async () => {
+    api.on('POST /internal/tickets/:id/claim', () => ({ json: { result: 'busy' } }));
+    const b = button(SUPPORT_A);
+    await h.handleClaim({ ...b.ctx, ticketId: TICKET, index: 0 });
+    expect(b.updates).toEqual([]);
+    expect(b.notes).toEqual(['Сначала закройте текущий тикет.']);
+    expect(discord.logs).toEqual([]);
+  });
+
+  it('yours: shows the claimed view with Close again, and neither writes to the user nor to the log', async () => {
+    api.on('POST /internal/tickets/:id/claim', () => ({
+      json: { result: 'yours', requesterDiscordId: REQUESTER, description: 'мой вопрос' },
+    }));
+    const b = button(SUPPORT_A);
+    await h.handleClaim({ ...b.ctx, ticketId: TICKET, index: 2 });
+    expect(b.updates[0]!.text).toContain('мой вопрос');
+    expect(b.updates[0]!.buttons).toEqual([{ id: `close:${TICKET}`, label: 'Закрыть тикет' }]);
+    expect(discord.dmsTo(REQUESTER)).toEqual([]);
+    expect(discord.logs).toEqual([]);
+    expect(discord.edits).toEqual([]);
+  });
+});
+
+describe('cancel by the requester (C3)', () => {
+  it('puts a Cancel button on the confirmation DM', async () => {
+    api.on('POST /internal/tickets', () => createdBody());
+    await h.handleHelpSubmit({ userId: REQUESTER, username: 'asker', text: 'q', ...replies() });
+    const msg = discord.dmsTo(REQUESTER)[0]!.msg;
+    expect(msg.buttons).toEqual([{ id: `cancel:${TICKET}`, label: 'Отменить' }]);
+    expect(parseButton(msg.buttons![0]!.id)).toEqual({ kind: 'cancel', ticketId: TICKET });
+  });
+
+  it('cancelled: updates the DM, closes the support offers and logs it', async () => {
+    await h.offer(TICKET, offered());
+    discord.logs = [];
+    api.on('POST /internal/tickets/:id/cancel', () => ({ json: { result: 'cancelled' } }));
+    const b = button(REQUESTER);
+    await h.handleCancel({ ...b.ctx, ticketId: TICKET });
+    expect(api.called('POST /internal/tickets/:id/cancel')[0]!.body).toEqual({ actorDiscordId: REQUESTER });
+    expect(b.updates[0]!.text).toContain('отменён');
+    expect(b.updates[0]!.buttons).toBeUndefined();
+    expect(discord.edits.map((e) => e.msg.text)).toEqual(['Тикет отменён.', 'Тикет отменён.']);
+    expect(discord.logText()).toContain('отменён');
+  });
+
+  it('claimed and closed: explains and cancels nothing', async () => {
+    const b = button(REQUESTER);
+    api.on('POST /internal/tickets/:id/cancel', () => ({ json: { result: 'claimed' } }));
+    await h.handleCancel({ ...b.ctx, ticketId: TICKET });
+    api.on('POST /internal/tickets/:id/cancel', () => ({ json: { result: 'closed' } }));
+    await h.handleCancel({ ...b.ctx, ticketId: TICKET });
+    expect(b.updates[0]!.text).toContain('уже принят');
+    expect(b.updates[1]!.text).toContain('уже закрыт');
+    expect(discord.edits).toEqual([]);
+  });
+
+  it('a failure leaves the message and notes it', async () => {
+    api.on('POST /internal/tickets/:id/cancel', () => apiError(500, 'INTERNAL'));
+    const b = button(REQUESTER);
+    await h.handleCancel({ ...b.ctx, ticketId: TICKET });
+    expect(b.updates).toEqual([]);
+    expect(b.notes).toHaveLength(1);
+  });
+});
+
+describe('admin actions and the idle close (C3)', () => {
+  const closed = {
+    json: { ticketId: TICKET, requesterDiscordId: REQUESTER, claimerDiscordId: SUPPORT_A, transcript: 'T', messageCount: 3 },
+  };
+
+  it('adminClose closes, sends the rating prompt, tells the claimer and logs the transcript', async () => {
+    api.on('POST /internal/tickets/:id/close', () => closed);
+    const note = await h.adminClose(TICKET, id(20), 'boss');
+    expect(note).toContain('закрыт');
+    expect(api.called('POST /internal/tickets/:id/close')[0]!.body).toEqual({ actorDiscordId: id(20) });
+    expect(discord.dmsTo(REQUESTER)[0]!.msg.buttons).toHaveLength(5);
+    expect(discord.dmsTo(SUPPORT_A)[0]!.msg.text).toContain('администратором');
+    expect(discord.logs.find((l) => l.file)!.embed!.fields.find((f) => f.name === 'Сообщений')!.value).toBe('3');
+    expect(discord.logText()).toContain(`boss (${id(20)})`);
+  });
+
+  it('adminClose reports an already closed ticket and rethrows a refusal', async () => {
+    api.on('POST /internal/tickets/:id/close', () => apiError(409, 'CONFLICT', 'ticket_closed'));
+    expect(await h.adminClose(TICKET, id(20))).toContain('уже закрыт');
+    api.on('POST /internal/tickets/:id/close', () => apiError(403, 'FORBIDDEN'));
+    await expect(h.adminClose(TICKET, id(20))).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('adminRelease tells both sides, logs, and the ticket is offered again by the scheduler', async () => {
+    api.on('POST /internal/tickets/:id/release', () => ({
+      json: { ticketId: TICKET, requesterDiscordId: REQUESTER, claimerDiscordId: SUPPORT_A },
+    }));
+    const note = await h.adminRelease(TICKET, id(20), 'boss');
+    expect(note).toContain('возвращён');
+    expect(discord.dmsTo(REQUESTER)[0]!.msg.text).toContain('возвращён в очередь');
+    expect(discord.dmsTo(SUPPORT_A)[0]!.msg.text).toContain('передан');
+    expect(discord.logText()).toContain('возвращён в очередь');
+    api.on('POST /internal/tickets/:id/release', () => apiError(409, 'CONFLICT', 'not_claimed'));
+    expect(await h.adminRelease(TICKET, id(20))).toContain('не в работе');
+  });
+
+  it('handleExpired tells both sides and writes the transcript to the log', async () => {
+    await h.handleExpired({
+      ticketId: TICKET,
+      requesterDiscordId: REQUESTER,
+      claimerDiscordId: SUPPORT_A,
+      transcript: 'T',
+      messageCount: 4,
+    });
+    expect(discord.dmsTo(REQUESTER)[0]!.msg.text).toContain('24 часа');
+    expect(discord.dmsTo(SUPPORT_A)[0]!.msg.text).toContain('24 часа');
+    const log = discord.logs.find((l) => l.file)!;
+    expect(log.file).toEqual({ name: 'ticket-11111111.txt', content: 'T' });
+    expect(log.embed!.fields.find((f) => f.name === 'Сообщений')!.value).toBe('4');
+  });
+});
+
+describe('DMs the bot cannot deliver (I9)', () => {
+  it('reports a closed DM to the API for the admin list, and still returns null', async () => {
+    api.on('POST /internal/delivery-failures', () => ({ json: { ok: true } }));
+    discord.closedDms.add(SUPPORT_A);
+    expect(await h.dm(SUPPORT_A, { text: 'x' }, 'проверка')).toBeNull();
+    expect(api.called('POST /internal/delivery-failures')[0]!.body).toEqual({
+      targetDiscordId: SUPPORT_A,
+      what: 'проверка',
+      code: 50007,
+    });
+  });
+
+  it('survives the report itself failing', async () => {
+    api.on('POST /internal/delivery-failures', () => apiError(500, 'INTERNAL'));
+    discord.closedDms.add(SUPPORT_A);
+    expect(await h.dm(SUPPORT_A, { text: 'x' }, 'проверка')).toBeNull();
+    expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('offers under stress', () => {
+  it('rethrows Discord error 40003 so the scheduler can back off the whole batch', async () => {
+    discord.sendDm = async () => {
+      throw Object.assign(new Error('too fast'), { code: 40003 });
+    };
+    await expect(h.offer(TICKET, offered())).rejects.toMatchObject({ code: 40003 });
+  });
+
+  it('keeps offering when Redis is down, and still takes the question from the API', async () => {
+    store.broken = true;
+    await h.offer(TICKET, offered());
+    expect(discord.dmsTo(SUPPORT_A)).toHaveLength(1);
+    expect(discord.dmsTo(SUPPORT_B)).toHaveLength(1);
+    expect(errors.length).toBeGreaterThan(0);
+    api.on('POST /internal/tickets/:id/claim', () => ({
+      json: { result: 'claimed', requesterDiscordId: REQUESTER, description: 'из базы' },
+    }));
+    const b = button(SUPPORT_A);
+    await h.handleClaim({ ...b.ctx, ticketId: TICKET, index: 0 });
+    expect(b.updates[0]!.text).toContain('из базы');
+  });
+});
+
+describe('relay details', () => {
+  const run = (over: Partial<Parameters<typeof h.handleDm>[0]>) => {
+    const r = replies();
+    return {
+      r,
+      done: h.handleDm({
+        authorId: REQUESTER,
+        username: 'someone',
+        isBot: false,
+        content: '',
+        attachments: [],
+        messageId: 'm',
+        reply: r.reply,
+        ...over,
+      }),
+    };
+  };
+
+  it('tells the sender when the message has neither text nor a file', async () => {
+    const x = run({ content: '   ' });
+    await x.done;
+    expect(x.r.out[0]).toContain('нет ни текста, ни файла');
+    expect(api.calls).toEqual([]);
+  });
+
+  it('skips files over 25 MB with a note and keeps the original link', async () => {
+    api.on('GET /internal/tickets/active', () => ({
+      json: { ticket: { ticketId: TICKET, status: 'claimed', role: 'support', counterpartDiscordId: REQUESTER } },
+    }));
+    api.on('POST /internal/tickets/:id/messages', () => ({ json: { isStaff: true, recipientDiscordId: REQUESTER } }));
+    await run({
+      authorId: SUPPORT_A,
+      content: 'вот',
+      attachments: [{ url: 'https://cdn.example/big.zip', name: 'big.zip', size: 26 * 1024 * 1024 }],
+    }).done;
+    expect(discord.archived).toEqual([]);
+    const saved = api.called('POST /internal/tickets/:id/messages')[0]!.body as { content: string };
+    expect(saved.content).toBe('вот\nВложение: big.zip — больше 25 МБ, в логе нет копии: https://cdn.example/big.zip');
+  });
+
+  it('keeps the original link when the copy to the log fails', async () => {
+    discord.brokenArchive = true;
+    api.on('GET /internal/tickets/active', () => ({
+      json: { ticket: { ticketId: TICKET, status: 'claimed', role: 'support', counterpartDiscordId: REQUESTER } },
+    }));
+    api.on('POST /internal/tickets/:id/messages', () => ({ json: { isStaff: true, recipientDiscordId: REQUESTER } }));
+    await run({
+      authorId: SUPPORT_A,
+      attachments: [{ url: 'https://cdn.example/a.png', name: 'a.png', size: 10 }],
+    }).done;
+    const saved = api.called('POST /internal/tickets/:id/messages')[0]!.body as { content: string };
+    expect(saved.content).toContain('копия в логе не сохранилась: https://cdn.example/a.png');
+    expect(errors.length).toBeGreaterThan(0);
+    expect(discord.dmsTo(REQUESTER)).toHaveLength(1);
+  });
+});
+
+describe('transcript to the log', () => {
+  const closeJson = () => ({
+    json: { ticketId: TICKET, requesterDiscordId: REQUESTER, transcript: 'T', messageCount: 1, claimerDiscordId: null },
+  });
+
+  it('retries the send up to 3 times', async () => {
+    api.on('POST /internal/tickets/:id/close', closeJson);
+    discord.logFailures = 2;
+    await h.handleClose({ ...button(SUPPORT_A).ctx, ticketId: TICKET });
+    expect(discord.logs.some((l) => l.file)).toBe(true);
+  });
+
+  it('gives up after 3 attempts without breaking the close', async () => {
+    api.on('POST /internal/tickets/:id/close', closeJson);
+    discord.logFailures = 3;
+    const b = button(SUPPORT_A);
+    await h.handleClose({ ...b.ctx, ticketId: TICKET });
+    expect(discord.logs.some((l) => l.file)).toBe(false);
+    expect(b.updates[0]!.text).toContain('закрыт');
+    expect(errors).toHaveLength(1);
   });
 });

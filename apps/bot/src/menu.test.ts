@@ -4,6 +4,7 @@ import { STALE, STALE_DEV, createMenu, type Menu } from './menu.js';
 import type { MenuResult, MenuView } from './ports.js';
 import { ApiStub, CFG, TICKET, apiError, id } from './testing/kit.js';
 import { addDays, localDate, parseTypedDate, zonedHour } from './zone.js';
+import { ApiError } from './api.js';
 
 const DEV = id(21);
 const ADMIN = id(20);
@@ -84,7 +85,7 @@ describe('/menu access by level', () => {
   it('gives an admin and a developer every section', async () => {
     for (const who of [ADMIN, DEV]) {
       const { v } = await opened(who);
-      expect(labels(v)).toEqual(['Расписание ПТ', 'Настройки', 'Права', 'Открытые тикеты']);
+      expect(labels(v)).toEqual(['Расписание ПТ', 'Настройки', 'Права', 'Открытые тикеты', 'Ошибки доставки']);
     }
   });
 
@@ -256,7 +257,10 @@ describe('admin sections', () => {
     api.on('GET /internal/menu/settings', () => ({ json: SETTINGS }));
     api.on('PATCH /internal/menu/settings', (b) => ({ json: { ...SETTINGS, ...(b as { patch: object }).patch } }));
     const { sid } = await opened(ADMIN);
+    await menu.interact({ userId: ADMIN, customId: cid(sid, 'settings') });
     const modal = await menu.interact({ userId: ADMIN, customId: cid(sid, 'settings-edit') });
+    // The modal shows what the settings view showed; it asks the API nothing (I3).
+    expect(api.called('GET /internal/menu/settings')).toHaveLength(1);
     expect('modal' in modal && modal.modal.inputs.map((i) => [i.id, i.value])).toEqual([
       ['ticketRate', '10'],
       ['shiftHourRate', '5'],
@@ -476,8 +480,145 @@ describe('dates and hours', () => {
     expect(parseTypedDate('завтра', '2026-11-01')).toBeNull();
   });
   it('maps a local hour to its instant', () => {
-    expect(zonedHour('2026-11-01', 0, 'Europe/Moscow').toISOString()).toBe('2026-10-31T21:00:00.000Z');
+    expect(zonedHour('2026-11-01', 0, 'Europe/Moscow')!.toISOString()).toBe('2026-10-31T21:00:00.000Z');
     expect(localDate(new Date('2026-10-31T21:30:00Z'), 'Europe/Moscow')).toBe('2026-11-01');
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
+  });
+});
+
+describe('settings modal without an API call (I3)', () => {
+  it('opens from the session and refuses a session that never showed the settings', async () => {
+    const { sid } = await opened(ADMIN);
+    expect(await menu.interact({ userId: ADMIN, customId: cid(sid, 'settings-edit') })).toEqual({ note: STALE });
+    expect(api.called('GET /internal/menu/settings')).toHaveLength(0);
+  });
+});
+
+describe('open tickets: close and release (C3)', () => {
+  const T2 = TICKET.replace('1111', '9999');
+  const list = {
+    total: 2,
+    items: [
+      { ticketId: TICKET, status: 'claimed', createdAt: '2026-11-01T07:30:00Z', claimerDiscordId: STAFF_A, claimerUsername: 'anna' },
+      { ticketId: T2, status: 'open', createdAt: '2026-11-01T08:55:00Z', claimerDiscordId: null, claimerUsername: null },
+    ],
+  };
+  let acts: string[];
+  let refuse: boolean;
+  let m: Menu;
+  const buttonsOf = (v: MenuView) =>
+    v.rows.flatMap((r) => (r.kind === 'buttons' ? r.buttons : [])).map((b) => `${b.label}${b.disabled ? ':off' : ''}`);
+
+  beforeEach(() => {
+    acts = [];
+    refuse = false;
+    api.on('GET /internal/tickets/open', () => ({ json: list }));
+    let n = 0;
+    m = createMenu({
+      api: api.client(),
+      config: CFG,
+      now: () => clock,
+      newSid: () => (++n + 100).toString(16).padStart(8, '0'),
+      onError: (e) => errors.push(e),
+      tickets: {
+        close: async (t, actor, name) => {
+          if (refuse) throw new ApiError(403, 'FORBIDDEN', undefined, 'x');
+          acts.push(`close ${t} ${actor} ${name}`);
+          return 'Тикет #11111111 закрыт.';
+        },
+        release: async (t, actor) => (acts.push(`release ${t} ${actor}`), 'Тикет #11111111 возвращён в очередь.'),
+      },
+    });
+  });
+
+  async function opened2() {
+    const home = view(await m.open({ userId: ADMIN }));
+    const sid = sidOf(home);
+    return { sid, v: view(await m.interact({ userId: ADMIN, customId: cid(sid, 'tickets') })) };
+  }
+
+  it('offers a select of tickets, with Close and Release off until one is picked', async () => {
+    const { v } = await opened2();
+    const sel = v.rows.find((r) => r.kind === 'select');
+    expect(sel?.kind === 'select' && sel.options.map((o) => o.value)).toEqual([TICKET, T2]);
+    expect(buttonsOf(v)).toEqual(['Закрыть:off', 'Вернуть в очередь:off', 'Обновить', 'Назад']);
+    limitsHold(v);
+  });
+
+  it('closes the picked ticket as the person who pressed, then shows the refreshed list', async () => {
+    const { sid } = await opened2();
+    const picked = view(await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-pick'), values: [TICKET] }));
+    expect(picked.text).toContain('Выбран: #11111111');
+    expect(buttonsOf(picked)).toEqual(['Закрыть', 'Вернуть в очередь', 'Обновить', 'Назад']);
+    const after = view(await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-close'), username: 'boss' }));
+    expect(acts).toEqual([`close ${TICKET} ${ADMIN} boss`]);
+    expect(after.text).toContain('Тикет #11111111 закрыт.');
+    expect(buttonsOf(after)).toEqual(['Закрыть:off', 'Вернуть в очередь:off', 'Обновить', 'Назад']);
+  });
+
+  it('releases only a claimed ticket', async () => {
+    const { sid } = await opened2();
+    const open = view(await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-pick'), values: [T2] }));
+    expect(buttonsOf(open)).toEqual(['Закрыть', 'Вернуть в очередь:off', 'Обновить', 'Назад']);
+    await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-pick'), values: [TICKET] });
+    const done = view(await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-release') }));
+    expect(acts).toEqual([`release ${TICKET} ${ADMIN}`]);
+    expect(done.text).toContain('возвращён в очередь');
+  });
+
+  it('asks to pick first, and ignores a value that is not a ticket id', async () => {
+    const { sid } = await opened2();
+    expect(view(await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-close') })).text).toContain('Сначала выберите тикет');
+    expect(await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-pick'), values: ['nope'] })).toEqual({ note: expect.any(String) });
+    expect(acts).toEqual([]);
+  });
+
+  it('shows "Нет доступа" when the admin lost the role in between', async () => {
+    const { sid } = await opened2();
+    await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-pick'), values: [TICKET] });
+    refuse = true;
+    const r = view(await m.interact({ userId: ADMIN, customId: cid(sid, 'ticket-close') }));
+    expect(r.text).toContain('Нет доступа');
+    expect(r.rows).toEqual([]);
+  });
+});
+describe('delivery failures (I9)', () => {
+  it('lists the last failed DMs for an admin', async () => {
+    api.on('GET /internal/delivery-failures', () => ({
+      json: {
+        items: [
+          { at: '2026-11-01T08:55:00Z', discordId: STAFF_A, what: 'напоминание о ПТ', code: 50007 },
+          { at: '2026-11-01T07:00:00Z', discordId: STAFF_B, what: 'тикет #11111111', code: null },
+        ],
+      },
+    }));
+    const { sid } = await opened(ADMIN);
+    const v = view(await menu.interact({ userId: ADMIN, customId: cid(sid, 'delivery') }));
+    expect(api.called('GET /internal/delivery-failures')[0]!.query).toEqual({ actorDiscordId: ADMIN });
+    expect(v.text).toContain('Ошибки доставки');
+    expect(v.text).toContain('01.11 11:55');
+    expect(v.text).toContain(`<@${STAFF_A}>`);
+    expect(v.text).toContain('напоминание о ПТ');
+    expect(v.text).toContain('50007');
+    limitsHold(v);
+  });
+
+  it('says so when there are none, and shows "Нет доступа" when the admin lost the role', async () => {
+    api.on('GET /internal/delivery-failures', () => ({ json: { items: [] } }));
+    const { sid } = await opened(ADMIN);
+    expect(view(await menu.interact({ userId: ADMIN, customId: cid(sid, 'delivery') })).text).toContain('Ошибок доставки нет');
+    api.on('GET /internal/delivery-failures', () => apiError(403, 'FORBIDDEN'));
+    expect(view(await menu.interact({ userId: ADMIN, customId: cid(sid, 'delivery') })).text).toContain('Нет доступа');
+  });
+});
+
+describe('hours that do not exist (zone)', () => {
+  it('rejects a spring-forward gap, takes the first of a repeated hour, and keeps Moscow right', () => {
+    expect(zonedHour('2026-03-29', 2, 'Europe/Berlin')).toBeNull();
+    expect(zonedHour('2026-03-29', 3, 'Europe/Berlin')!.toISOString()).toBe('2026-03-29T01:00:00.000Z');
+    expect(zonedHour('2026-10-25', 2, 'Europe/Berlin')!.toISOString()).toBe('2026-10-25T00:00:00.000Z');
+    expect(zonedHour('2026-07-01', 12, 'Europe/Berlin')!.toISOString()).toBe('2026-07-01T10:00:00.000Z');
+    expect(zonedHour('2026-11-01', 0, 'Europe/Moscow')!.toISOString()).toBe('2026-10-31T21:00:00.000Z');
+    expect(zonedHour('2026-11-01', 23, 'Europe/Moscow')!.toISOString()).toBe('2026-11-01T20:00:00.000Z');
   });
 });

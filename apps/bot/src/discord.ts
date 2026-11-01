@@ -5,6 +5,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   Client,
+  ComponentType,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
@@ -89,7 +90,10 @@ export function createClient(cfg: Cfg, isRelevant: (userId: string, roleIds: Ite
   const keep = (m: GuildMember) => isRelevant(m.id, m.roles.cache.keys());
   return new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.DirectMessages],
-    partials: [Partials.Channel],
+    // GuildMember: an update for a member who is not in the small cache still reaches the roster.
+    partials: [Partials.Channel, Partials.GuildMember],
+    // No send of this bot ever mentions anybody, whatever the text says.
+    allowedMentions: { parse: [] },
     makeCache: Options.cacheWithLimits({
       ...Options.DefaultMakeCacheSettings,
       MessageManager: 50,
@@ -106,7 +110,7 @@ export function createClient(cfg: Cfg, isRelevant: (userId: string, roleIds: Ite
 }
 
 /** The Discord side of the handlers' ports. */
-export function createDiscordPort(client: Client, cfg: Cfg): DiscordPort {
+export function createDiscordPort(client: Client, cfg: Cfg, fetchImpl: typeof fetch = fetch): DiscordPort {
   return {
     async sendDm(userId: string, msg: OutMessage): Promise<MsgRef> {
       const user = await client.users.fetch(userId);
@@ -121,7 +125,65 @@ export function createDiscordPort(client: Client, cfg: Cfg): DiscordPort {
       const ch = await client.channels.fetch(cfg.channels.log);
       if (ch?.isSendable() && 'send' in ch) await ch.send(renderLog(msg));
     },
+    async archiveFile(file: { url: string; name: string }, caption: string): Promise<string> {
+      // Only Discord's own CDN: the address comes from a message, never from what a person typed.
+      const host = new URL(file.url).hostname;
+      if (!/(^|\.)(discordapp\.com|discordapp\.net|discord\.com)$/.test(host)) throw new Error('not a Discord attachment');
+      const res = await fetchImpl(file.url, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+      const data = Buffer.from(await res.arrayBuffer());
+      const ch = await client.channels.fetch(cfg.channels.log);
+      if (!ch?.isSendable() || !('send' in ch)) throw new Error('log channel is not sendable');
+      const sent = await ch.send({
+        content: caption.slice(0, 2000),
+        files: [new AttachmentBuilder(data, { name: file.name })],
+        allowedMentions: { parse: [] },
+      });
+      return sent.url;
+    },
   };
+}
+
+const LOG_PERMISSIONS = ['ViewChannel', 'SendMessages', 'AttachFiles', 'EmbedLinks'] as const;
+
+/**
+ * Checks `channels.log` at startup: the bot must be on the server with that channel and may write
+ * files to it. Throws one clear error instead of a failure on the first ticket close.
+ */
+export async function assertLogChannel(client: Client, cfg: Pick<ServerConfig, 'channels'>): Promise<void> {
+  const id = cfg.channels.log;
+  let ch;
+  try {
+    ch = await client.channels.fetch(id);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `channels.log (${id}): канал недоступен (${why}). Бот должен быть приглашён на сервер с логом и видеть этот канал.`,
+    );
+  }
+  if (!ch || !ch.isSendable()) {
+    throw new Error(`channels.log (${id}): это не канал, в который можно писать. Укажите текстовый канал.`);
+  }
+  const perms = client.user ? (ch as { permissionsFor?: (u: unknown) => { missing(p: readonly string[]): string[] } | null }).permissionsFor?.(client.user) : null;
+  const missing = perms ? perms.missing(LOG_PERMISSIONS) : [];
+  if (missing.length > 0) {
+    throw new Error(`channels.log (${id}): боту не хватает прав в канале: ${missing.join(', ')}.`);
+  }
+}
+
+/**
+ * Re-runs the roster snapshot when the gateway session was lost: events during the gap are gone.
+ * The first ready is the startup snapshot's job, not this one's.
+ */
+export function wireResync(
+  client: Pick<Client, 'on'>,
+  runner: { trigger(reason: string): void },
+  isReady: () => boolean,
+): void {
+  client.on(Events.Invalidated, () => runner.trigger('invalidated'));
+  client.on(Events.ShardReady, () => {
+    if (isReady()) runner.trigger('reconnected');
+  });
 }
 
 function helpModal(): ModalBuilder {
@@ -140,6 +202,16 @@ function helpModal(): ModalBuilder {
     );
 }
 
+/** The components of a message with every button switched off (rows and containers are searched). */
+export function disableButtons(components: readonly unknown[]): unknown[] {
+  return components.map((c) => {
+    const o = c as { type?: number; components?: unknown[] };
+    if (o.type === ComponentType.Button) return { ...o, disabled: true };
+    if (Array.isArray(o.components)) return { ...o, components: disableButtons(o.components) };
+    return c;
+  });
+}
+
 const ephemeral = (content: string) => ({ content, flags: MessageFlags.Ephemeral as const });
 
 /** Wires the gateway events to the handlers and the roster. Every listener catches its own errors. */
@@ -149,14 +221,35 @@ export function wire(
   roster: Roster,
   onError: (err: unknown, where: string) => void,
   menu: Menu,
+  cfg: Pick<ServerConfig, 'guildId'>,
 ): void {
   const guard = <A extends unknown[]>(where: string, fn: (...a: A) => Promise<void>) =>
     (...a: A): void => void fn(...a).catch((err: unknown) => onError(err, where));
+  // The bot also sits on the log server; its members are not our staff and must not reach the roster.
+  const ours = (m: { guild: { id: string } }): boolean => m.guild.id === cfg.guildId;
 
-  client.on(Events.GuildMemberUpdate, guard('member update', async (_old, m) => roster.memberUpdated(toRoster(m as GuildMember))));
+  client.on(
+    Events.GuildMemberUpdate,
+    guard('member update', async (_old, m) => {
+      if (!ours(m)) return;
+      await roster.memberUpdated(toRoster(m as GuildMember));
+    }),
+  );
   // A member who is not in the cache arrives here, not in guildMemberUpdate.
-  client.on(Events.GuildMemberAvailable, guard('member available', async (m) => roster.memberUpdated(toRoster(m as GuildMember))));
-  client.on(Events.GuildMemberRemove, guard('member remove', async (m) => roster.memberRemoved(m.id, roleIdsOf(m))));
+  client.on(
+    Events.GuildMemberAvailable,
+    guard('member available', async (m) => {
+      if (!ours(m)) return;
+      await roster.memberUpdated(toRoster(m as GuildMember));
+    }),
+  );
+  client.on(
+    Events.GuildMemberRemove,
+    guard('member remove', async (m) => {
+      if (!ours(m)) return;
+      await roster.memberRemoved(m.id, roleIdsOf(m));
+    }),
+  );
 
   client.on(
     Events.InteractionCreate,
@@ -188,14 +281,35 @@ export function wire(
         const b = parseButton(i.customId);
         if (!b) return;
         await i.deferUpdate();
+        // First press: the buttons go off at once, so a second click cannot start a second action.
+        // If the handler leaves the message as it is (a note, an error), the buttons come back.
+        const original = i.message.components.map((c) => c.toJSON());
+        const setComponents = async (components: unknown[]) => {
+          try {
+            await i.editReply({ components: components as never, flags: MessageFlags.IsComponentsV2 });
+          } catch (err) {
+            onError(err, 'button state');
+          }
+        };
+        let replaced = false;
+        await setComponents(disableButtons(original));
         const ctx = {
           userId: i.user.id,
-          update: async (m: OutMessage) => void (await i.editReply(renderEdit(m))),
+          username: i.user.username,
+          update: async (m: OutMessage) => {
+            replaced = true;
+            await i.editReply(renderEdit(m));
+          },
           notify: async (t: string) => void (await i.followUp(ephemeral(t))),
         };
-        if (b.kind === 'claim') await h.handleClaim({ ...ctx, ticketId: b.ticketId, index: b.index });
-        else if (b.kind === 'close') await h.handleClose({ ...ctx, ticketId: b.ticketId });
-        else await h.handleRating({ ...ctx, ticketId: b.ticketId, rating: b.rating });
+        try {
+          if (b.kind === 'claim') await h.handleClaim({ ...ctx, ticketId: b.ticketId, index: b.index });
+          else if (b.kind === 'close') await h.handleClose({ ...ctx, ticketId: b.ticketId });
+          else if (b.kind === 'cancel') await h.handleCancel({ ...ctx, ticketId: b.ticketId });
+          else await h.handleRating({ ...ctx, ticketId: b.ticketId, rating: b.rating });
+        } finally {
+          if (!replaced) await setComponents(original);
+        }
       }
     }),
   );
@@ -206,9 +320,10 @@ export function wire(
       if (m.author.bot || !m.channel.isDMBased()) return;
       await h.handleDm({
         authorId: m.author.id,
+        username: m.author.username,
         isBot: m.author.bot,
         content: m.content,
-        attachmentUrls: [...m.attachments.values()].map((a) => a.url),
+        attachments: [...m.attachments.values()].map((a) => ({ url: a.url, name: a.name, size: a.size })),
         messageId: m.id,
         reply: async (t) => {
           await m.author.send({ content: t });
@@ -218,23 +333,27 @@ export function wire(
   );
 }
 
-/** Members of the guild for the snapshot: all of them, and some by id. */
-export function guildSource(client: Client, guildId: string) {
+/** Members of the guild for the snapshot: those that pass a filter, and some by id. */
+export function guildSource(client: Client, guildId: string, onError: (err: unknown, where: string) => void) {
   return {
-    async fetchAll(): Promise<RosterMember[]> {
+    async fetchAll(keep: (roleIds: string[]) => boolean): Promise<RosterMember[]> {
       const guild = await client.guilds.fetch(guildId);
       const all = await guild.members.fetch({ time: 10 * 60_000 });
-      return all.map(toRoster);
+      // Only the members that pass the filter become rows: the rest are never mapped.
+      const out: RosterMember[] = [];
+      for (const m of all.values()) if (keep(roleIdsOf(m))) out.push(toRoster(m));
+      return out;
     },
     async fetchByIds(ids: string[]): Promise<RosterMember[]> {
       const guild = await client.guilds.fetch(guildId);
       const found: RosterMember[] = [];
-      // One request per id: an id that is not on the server is skipped, not an error for the rest.
+      // One request per id. Whatever Discord answers for one person (not on the server, rate
+      // limit, a timeout) is logged and skipped; it must not cost the snapshot the others.
       for (const id of ids) {
         try {
           found.push(toRoster(await guild.members.fetch(id)));
         } catch (err) {
-          if ((err as { code?: number }).code !== 10007) throw err; // Unknown Member
+          if ((err as { code?: number }).code !== 10007) onError(err, `fetch listed user ${id}`); // 10007: Unknown Member
         }
       }
       return found;
@@ -331,9 +450,10 @@ async function answerMenu(i: Interaction, r: MenuResult, deferred: 'update' | 'r
 /** Routes `/menu`, `/dev` and every menu component. Returns true when the interaction was a menu one. */
 export async function handleMenuInteraction(i: Interaction, menu: Menu): Promise<boolean> {
   if (i.isChatInputCommand() && (i.commandName === 'menu' || i.commandName === 'dev')) {
+    // Acknowledge first: the API call may take longer than the 3 seconds Discord allows.
+    await i.deferReply({ flags: MessageFlags.Ephemeral });
     const r = await (i.commandName === 'menu' ? menu.open({ userId: i.user.id }) : menu.openDev({ userId: i.user.id }));
-    if ('view' in r) await i.reply({ ...renderMenu(r.view), flags: MessageFlags.Ephemeral });
-    else if ('note' in r) await i.reply(ephemeral(r.note));
+    await answerMenu(i, r, 'reply');
     return true;
   }
   if (i.isModalSubmit() && isMenuId(i.customId)) {
@@ -341,7 +461,7 @@ export async function handleMenuInteraction(i: Interaction, menu: Menu): Promise
     for (const [k, f] of i.fields.fields) if ('value' in f && typeof f.value === 'string') fields[k] = f.value;
     if (i.isFromMessage()) await i.deferUpdate();
     else await i.deferReply({ flags: MessageFlags.Ephemeral });
-    const r = await menu.interact({ userId: i.user.id, customId: i.customId, fields });
+    const r = await menu.interact({ userId: i.user.id, username: i.user.username, customId: i.customId, fields });
     await answerMenu(i, r, i.isFromMessage() ? 'update' : 'reply');
     return true;
   }
@@ -349,7 +469,7 @@ export async function handleMenuInteraction(i: Interaction, menu: Menu): Promise
     const values = i.isButton() ? [] : i.values;
     const modal = opensModal(i.customId);
     if (!modal) await i.deferUpdate();
-    const r = await menu.interact({ userId: i.user.id, customId: i.customId, values });
+    const r = await menu.interact({ userId: i.user.id, username: i.user.username, customId: i.customId, values });
     await answerMenu(i, r, modal ? null : 'update');
     return true;
   }

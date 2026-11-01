@@ -198,4 +198,45 @@ describe('/internal ticket and PT routes', () => {
         items: [{ status: 'open', claimerDiscordId: null, claimerUsername: null }],
       });
     }));
+
+  it('release, cancel, expire and delivery failures', () =>
+    withApp({ redis }, async (ctx) => {
+      const deps = { db: ctx.db, config };
+      await seedDefaults(ctx.db, config.guildId);
+      await syncMember(deps, memberInput(1, [ADMIN_ROLE]));
+      await syncMember(deps, memberInput(2, [SUPPORT_ROLE]));
+      await syncMember(deps, memberInput(3, [SUPPORT_ROLE, CURATOR_ROLE]));
+      await call(ctx, 'PUT', '/internal/pt', { actorDiscordId: discordId(1), startsAt: HOUR.toISOString(), discordUserId: discordId(2) });
+      const created = (
+        await call(ctx, 'POST', '/internal/tickets', { actorDiscordId: discordId(50), username: 'a', message: 'q' })
+      ).json() as { ticketId: string; challenges: { challenge: { target: string; options: string[] } }[] };
+      const ch = created.challenges[0]!.challenge;
+      const claim = await call(ctx, 'POST', `/internal/tickets/${created.ticketId}/claim`, {
+        actorDiscordId: discordId(2),
+        choiceIndex: ch.options.indexOf(ch.target),
+      });
+      expect(claim.json()).toMatchObject({ result: 'claimed', description: 'q' });
+      const again = await call(ctx, 'POST', `/internal/tickets/${created.ticketId}/claim`, {
+        actorDiscordId: discordId(2),
+        choiceIndex: ch.options.indexOf(ch.target),
+      });
+      expect(again.json()).toMatchObject({ result: 'yours', description: 'q' });
+
+      // The requester cannot cancel a claimed ticket; only an admin releases.
+      expect((await call(ctx, 'POST', `/internal/tickets/${created.ticketId}/cancel`, { actorDiscordId: discordId(50) })).json()).toEqual({ result: 'claimed' });
+      expect((await call(ctx, 'POST', `/internal/tickets/${created.ticketId}/release`, { actorDiscordId: discordId(3) })).statusCode).toBe(403);
+      const rel = await call(ctx, 'POST', `/internal/tickets/${created.ticketId}/release`, { actorDiscordId: discordId(1) });
+      expect(rel.json()).toEqual({ ticketId: created.ticketId, requesterDiscordId: discordId(50), claimerDiscordId: discordId(2) });
+      expect((await call(ctx, 'POST', `/internal/tickets/${created.ticketId}/cancel`, { actorDiscordId: discordId(50) })).json()).toEqual({ result: 'cancelled' });
+
+      expect((await call(ctx, 'POST', '/internal/tickets/expire')).json()).toEqual({ items: [] });
+      expect((await call(ctx, 'POST', '/internal/tickets/expire')).statusCode).toBe(200);
+
+      expect(
+        (await call(ctx, 'POST', '/internal/delivery-failures', { targetDiscordId: discordId(2), what: 'напоминание о ПТ', code: 50007 })).statusCode,
+      ).toBe(200);
+      expect((await call(ctx, 'GET', `/internal/delivery-failures?actorDiscordId=${discordId(3)}`)).statusCode).toBe(403);
+      const failures = await call(ctx, 'GET', `/internal/delivery-failures?actorDiscordId=${discordId(1)}`);
+      expect(failures.json()).toMatchObject({ items: [{ discordId: discordId(2), what: 'напоминание о ПТ', code: 50007 }] });
+    }));
 });
