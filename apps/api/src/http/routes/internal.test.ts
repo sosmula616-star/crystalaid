@@ -98,12 +98,12 @@ describe('/internal ticket and PT routes', () => {
 
       const asRequester = await call(ctx, 'POST', `/internal/tickets/${ticketId}/claim`, {
         actorDiscordId: discordId(50),
-        choice: challenges[0]!.challenge.target,
+        choiceIndex: challenges[0]!.challenge.options.indexOf(challenges[0]!.challenge.target),
       });
       expect(asRequester.statusCode).toBe(403);
       const claim = await call(ctx, 'POST', `/internal/tickets/${ticketId}/claim`, {
         actorDiscordId: discordId(2),
-        choice: challenges[0]!.challenge.target,
+        choiceIndex: challenges[0]!.challenge.options.indexOf(challenges[0]!.challenge.target),
       });
       expect(claim.json()).toMatchObject({ result: 'claimed' });
 

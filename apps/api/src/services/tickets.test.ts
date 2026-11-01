@@ -49,6 +49,8 @@ const open = (deps: { db: Db; config: typeof config }, message = 'help me', now 
 
 const challengeFor = (c: Awaited<ReturnType<typeof open>>, n: number) =>
   c.challenges.find((x) => x.supportDiscordId === discordId(n))!.challenge;
+/** Index (0 to 3) of the right option, as the bot's button would send it. */
+const rightIndex = (ch: { target: string; options: string[] }) => ch.options.indexOf(ch.target);
 
 describe('createTicket', () => {
   it('stores the first message and challenges only supports on duty now', async () =>
@@ -108,12 +110,12 @@ describe('claimTicket', () => {
       const { deps } = await setup(db);
       const created = await open(deps);
       const a = challengeFor(created, SUPPORT_A);
-      const wrong = a.options.find((o) => o !== a.target)!;
+      const wrong = (rightIndex(a) + 1) % 4;
       expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), wrong, NOW)).result).toBe('wrong');
-      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), a.target, NOW)).result).toBe('wrong');
+      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), rightIndex(a), NOW)).result).toBe('wrong');
       expect((await db.select().from(tickets))[0]!.status).toBe('open');
       const b = challengeFor(created, SUPPORT_B);
-      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_B), b.target, NOW)).result).toBe('claimed');
+      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_B), rightIndex(b), NOW)).result).toBe('claimed');
     }));
 
   it('reports already_taken and closed, and counts the claim', async () =>
@@ -121,15 +123,15 @@ describe('claimTicket', () => {
       const { deps, admin } = await setup(db);
       const created = await open(deps);
       const id = created.ticket.id;
-      const r = await claimTicket(deps, id, discordId(SUPPORT_A), challengeFor(created, SUPPORT_A).target, NOW);
+      const r = await claimTicket(deps, id, discordId(SUPPORT_A), rightIndex(challengeFor(created, SUPPORT_A)), NOW);
       expect(r).toMatchObject({ result: 'claimed', requesterDiscordId: discordId(REQUESTER) });
       expect(
-        (await claimTicket(deps, id, discordId(SUPPORT_B), challengeFor(created, SUPPORT_B).target, NOW)).result,
+        (await claimTicket(deps, id, discordId(SUPPORT_B), rightIndex(challengeFor(created, SUPPORT_B)), NOW)).result,
       ).toBe('already_taken');
       expect((await db.select().from(staffDaily))[0]).toMatchObject({ ticketsClaimed: 1 });
       await closeTicket(deps, id, admin, NOW);
       expect(
-        (await claimTicket(deps, id, discordId(SUPPORT_B), challengeFor(created, SUPPORT_B).target, NOW)).result,
+        (await claimTicket(deps, id, discordId(SUPPORT_B), rightIndex(challengeFor(created, SUPPORT_B)), NOW)).result,
       ).toBe('closed');
     }));
 
@@ -144,7 +146,7 @@ describe('claimTicket', () => {
       expect(created.challenges).toHaveLength(10);
       const results = await Promise.all(
         supports.map((n) =>
-          claimTicket(deps, created.ticket.id, discordId(n), challengeFor(created, n).target, NOW),
+          claimTicket(deps, created.ticket.id, discordId(n), rightIndex(challengeFor(created, n)), NOW),
         ),
       );
       expect(results.filter((r) => r.result === 'claimed')).toHaveLength(1);
@@ -154,11 +156,25 @@ describe('claimTicket', () => {
     }));
 });
 
+describe('claimTicket by index', () => {
+  it('stores the 4 options and treats an out-of-range index as a spent wrong attempt', async () =>
+    withTestDb(async (db) => {
+      const { deps } = await setup(db, [SUPPORT_A]);
+      const created = await open(deps);
+      const a = challengeFor(created, SUPPORT_A);
+      const [row] = await db.select().from(ticketChallenges);
+      expect(row!.options).toEqual(a.options);
+      expect(row!.options).toHaveLength(4);
+      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), 4, NOW)).result).toBe('wrong');
+      expect((await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), rightIndex(a), NOW)).result).toBe('wrong');
+    }));
+});
+
 describe('messages, close and rating', () => {
   async function claimed(db: Db) {
     const { deps, admin } = await setup(db);
     const created = await open(deps);
-    await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), challengeFor(created, SUPPORT_A).target, NOW);
+    await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), rightIndex(challengeFor(created, SUPPORT_A)), NOW);
     return { deps, admin, id: created.ticket.id };
   }
 
@@ -246,7 +262,7 @@ describe('dueTickets', () => {
       const { deps } = await setup(db);
       const created = await open(deps);
       const a = challengeFor(created, SUPPORT_A);
-      await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), a.options.find((o) => o !== a.target)!, NOW);
+      await claimTicket(deps, created.ticket.id, discordId(SUPPORT_A), (rightIndex(a) + 1) % 4, NOW);
       expect(await dueTickets(deps, new Date(NOW.getTime() + 4 * MIN))).toEqual([]);
       const due = await dueTickets(deps, new Date(NOW.getTime() + 6 * MIN));
       expect(due).toHaveLength(1);
@@ -256,7 +272,7 @@ describe('dueTickets', () => {
       // The new challenge is the one that counts.
       const fresh = due[0]!.challenges[0]!.challenge;
       expect(
-        (await claimTicket(deps, created.ticket.id, discordId(SUPPORT_B), fresh.target, NOW)).result,
+        (await claimTicket(deps, created.ticket.id, discordId(SUPPORT_B), rightIndex(fresh), NOW)).result,
       ).toBe('claimed');
     }));
 

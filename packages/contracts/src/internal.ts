@@ -44,7 +44,8 @@ export const CreateTicketResponse = z.object({
 });
 export type CreateTicketResponse = z.infer<typeof CreateTicketResponse>;
 
-export const ClaimRequest = z.object({ ...Actor, choice: ItemKeySchema });
+/** The answer is the position (0 to 3) of the pressed button, never an item key. */
+export const ClaimRequest = z.object({ ...Actor, choiceIndex: z.number().int().min(0).max(3) });
 export type ClaimRequest = z.infer<typeof ClaimRequest>;
 export const ClaimResponse = z.object({
   result: z.enum(['claimed', 'wrong', 'already_taken', 'closed']),

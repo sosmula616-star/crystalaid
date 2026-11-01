@@ -29,6 +29,13 @@
       "when": 1793534087225,
       "tag": "0003_bot_tickets_pt",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793534845797,
+      "tag": "0004_ticket_challenge_options",
+      "breakpoints": true
     }
   ]
 }

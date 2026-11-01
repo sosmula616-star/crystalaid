@@ -150,6 +150,8 @@ export const ticketChallenges = pgTable(
       .references(() => tickets.id, { onDelete: 'cascade' }),
     userId: userRef(),
     answer: text('answer').notNull(),
+    // The 4 option keys in the order shown; a claim names a position, not a key.
+    options: jsonb('options').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     attemptedAt: ts('attempted_at'),
     createdAt: createdAt(),
   },

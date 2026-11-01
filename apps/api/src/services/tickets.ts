@@ -100,10 +100,10 @@ async function issueChallenges(
     const challenge = makeChallenge();
     const rows = await tx
       .insert(ticketChallenges)
-      .values({ ticketId, userId: s.userId, answer: challenge.target })
+      .values({ ticketId, userId: s.userId, answer: challenge.target, options: challenge.options })
       .onConflictDoUpdate({
         target: [ticketChallenges.ticketId, ticketChallenges.userId],
-        set: { answer: challenge.target },
+        set: { answer: challenge.target, options: challenge.options },
         setWhere: isNull(ticketChallenges.attemptedAt),
       })
       .returning({ userId: ticketChallenges.userId });
@@ -228,7 +228,7 @@ export async function createTicket(
 export type ClaimResult = 'claimed' | 'wrong' | 'already_taken' | 'closed';
 
 /**
- * A support answers the check. One attempt per support per ticket: the attempt is spent before
+ * A support answers the check by the position (0 to 3) of the pressed option. One attempt per support per ticket: the attempt is spent before
  * the answer is compared. A correct first answer takes the ticket with one atomic
  * `UPDATE ... WHERE status = 'open'`, so of any number of parallel correct answers one wins.
  */
@@ -236,7 +236,7 @@ export async function claimTicket(
   deps: TicketDeps,
   ticketId: string,
   supportDiscordId: string,
-  choice: string,
+  choiceIndex: number,
   now: Date = new Date(),
 ): Promise<{ result: ClaimResult; ticket?: TicketRow; requesterDiscordId?: string }> {
   const { db, config } = deps;
@@ -258,8 +258,8 @@ export async function claimTicket(
           isNull(ticketChallenges.attemptedAt),
         ),
       )
-      .returning({ answer: ticketChallenges.answer });
-    if (!attempt || attempt.answer !== choice) return { result: 'wrong' as const };
+      .returning({ answer: ticketChallenges.answer, options: ticketChallenges.options });
+    if (!attempt || !Number.isInteger(choiceIndex) || attempt.options[choiceIndex] !== attempt.answer) return { result: 'wrong' as const };
 
     const [claimed] = await tx
       .update(tickets)

@@ -100,7 +100,7 @@ export function registerInternal(
     const { id } = TicketIdParams.parse(request.params);
     const body = ClaimRequest.parse(request.body);
     await requireActor(svc, body.actorDiscordId, 'SUPPORT');
-    const r = await claimTicket(svc, id, body.actorDiscordId, body.choice);
+    const r = await claimTicket(svc, id, body.actorDiscordId, body.choiceIndex);
     return { result: r.result, ...(r.requesterDiscordId ? { requesterDiscordId: r.requesterDiscordId } : {}) };
   });
 
