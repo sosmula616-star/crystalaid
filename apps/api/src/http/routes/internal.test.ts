@@ -85,7 +85,7 @@ describe('/internal ticket and PT routes', () => {
       expect(created.body).not.toContain('answer');
       const { ticketId, challenges } = created.json() as {
         ticketId: string;
-        challenges: { supportDiscordId: string; challenge: { target: string } }[];
+        challenges: { supportDiscordId: string; challenge: { target: string; options: string[] } }[];
       };
       expect(challenges).toHaveLength(1);
 

@@ -1,6 +1,6 @@
 # Развёртывание
 
-Существуют API, worker и Activity (статический клиент, см. последний раздел). Бота пока нет: события в `events:bot` некому присылать.
+Существуют API, worker, бот (`apps/bot`) и Activity (статический клиент, см. последний раздел).
 
 ## Требования
 
@@ -18,7 +18,9 @@
    | `DISCORD_API_URL` | по умолчанию `https://discord.com/api/v10` |
    | `DATABASE_URL`, `REDIS_URL` | подключения; в `REDIS_URL` должен быть пароль |
    | `POSTGRES_PASSWORD`, `REDIS_PASSWORD` | пароли для `docker-compose.yml` (только для него; сервисы читают их из URL) |
-   | `JWT_SECRET`, `SERVICE_TOKEN` | секреты, не короче 32 символов |
+   | `JWT_SECRET`, `SERVICE_TOKEN` | секреты, не короче 32 символов; `SERVICE_TOKEN` один и тот же у API и бота |
+   | `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID` | бот читает оба; `DISCORD_CLIENT_ID` нужен для `register` |
+   | `API_URL` | адрес API для бота; по умолчанию `http://127.0.0.1:PORT` |
    | `TRUSTED_PROXIES` | адреса или CIDR обратных прокси через запятую; пусто: не доверять никому |
    | `PORT` | порт API, по умолчанию 3001 |
    | `CONFIG_PATH` | путь к файлу конфигурации сервера (необязательно) |
@@ -36,7 +38,14 @@ pnpm --dir apps/api run api
 pnpm --dir apps/api run worker
 ```
 
-Оба завершаются по SIGTERM и SIGINT. Worker можно запускать в нескольких экземплярах: общая группа Redis делит события между ними. API слушает `0.0.0.0:PORT`. `GET /health` подходит для проверки живости.
+```
+pnpm --dir apps/bot run register   # один раз и после смены команд: /help, /menu, /dev
+pnpm --dir apps/bot run start
+```
+
+Бот читает корневой `.env` так же, как API, и использует `REDIS_URL` для потока `events:bot` и коротких записей (`bot:ticket:*`, 24 часа). Ему нужны интенты Guilds, Server Members и Direct Messages (Server Members требует заявки в Developer Portal при 10 000 и более участников) и право писать в `channels.log`. Все три процесса завершаются по SIGTERM и SIGINT.
+
+Worker можно запускать в нескольких экземплярах: общая группа Redis делит события между ними. API слушает `0.0.0.0:PORT`. `GET /health` подходит для проверки живости.
 
 ## Redis
 
