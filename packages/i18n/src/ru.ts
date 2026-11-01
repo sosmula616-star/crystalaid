@@ -35,6 +35,20 @@ export const ru = {
   'auth.error.description': 'Что-то пошло не так. Повторите попытку.',
   'toast.close': 'Закрыть',
   'toast.region': 'Уведомления',
+  'level.NONE': 'Нет уровня',
+  'level.SUPPORT': 'Саппорт',
+  'level.CURATOR': 'Куратор',
+  'level.ADMIN': 'Админ',
+  'shell.nav': 'Основная навигация',
+  'shell.more': 'Ещё',
+  'shell.moreTitle': 'Все разделы',
+  'shell.closeMore': 'Закрыть',
+  'shell.skipToContent': 'Перейти к содержимому',
+  'shell.openOverview': 'Открыть обзор',
+  'shell.loadingSection': 'Раздел загружается',
+  'shell.sectionError.title': 'Не удалось показать раздел',
+  'shell.sectionError.description': 'Остальные разделы работают. Повторите попытку.',
+  'shell.placeholder.title': 'Раздел появится в следующих версиях',
 } as const;
 
 export type MessageKey = keyof typeof ru;

@@ -19,5 +19,21 @@ export default defineConfig({
       },
     },
   },
-  build: { outDir: 'dist', sourcemap: false },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rolldownOptions: {
+      output: {
+        // Lazy sections are tiny for now, so the vendor code is split by library
+        // to keep every chunk under the 500 kB warning and cacheable on its own.
+        codeSplitting: {
+          groups: [
+            { name: 'discord-sdk', test: /node_modules[\\/](@discord|zod)[\\/]/ },
+            { name: 'radix', test: /node_modules[\\/](@radix-ui|@floating-ui|aria-hidden|react-remove-scroll[^\\/]*)[\\/]/ },
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
 });

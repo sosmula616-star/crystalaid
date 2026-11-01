@@ -20,6 +20,8 @@ const api = createApiClient({
   getToken: () => session.token(),
   refresh: () => session.refresh(),
 });
+// A stable function: the shell subscribes in an effect that depends on it.
+const onLayoutMode = (callback: (mode: number) => void) => sdk.onLayoutMode(callback);
 const session = createSession({
   sdk,
   login: (code, instanceId) => api.post('/auth/activity', { code, instanceId }, ActivityAuthResponse),
@@ -28,7 +30,7 @@ const session = createSession({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <TooltipProvider>
-      <App session={session} api={api} discordLocale={() => sdk.locale} />
+      <App session={session} api={api} discordLocale={() => sdk.locale} onLayoutMode={onLayoutMode} />
     </TooltipProvider>
   </StrictMode>,
 );
