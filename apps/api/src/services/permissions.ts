@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { AppError } from '@crystalaid/contracts';
 import { PERMISSIONS, type Level, type Permission } from '@crystalaid/domain';
-import { rolePermissions, staffMembers, type Db } from '@crystalaid/database';
+import { rolePermissions, seedDefaults, settings, staffMembers, type Db } from '@crystalaid/database';
 import { writeAudit } from './audit.js';
 
 type GrantLevel = 'SUPPORT' | 'CURATOR';
@@ -69,4 +69,13 @@ export async function updateGrants(
       data: { level, before: before.map((r) => r.permission).sort(), after: [...wanted].sort() },
     });
   });
+}
+
+/**
+ * First start of a guild: inserts the spec default settings and grants, but only when the guild
+ * has no `settings` row. Later starts do nothing, so grants an admin removed stay removed.
+ */
+export async function ensureSeeded(db: Db, guildId: string): Promise<void> {
+  const [row] = await db.select({ guildId: settings.guildId }).from(settings).where(eq(settings.guildId, guildId));
+  if (!row) await seedDefaults(db, guildId);
 }

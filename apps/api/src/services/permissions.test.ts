@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_GRANTS, type Permission } from '@crystalaid/domain';
 import { auditLog, rolePermissions, seedDefaults, withTestDb } from '@crystalaid/database';
-import { getGrants, updateGrants } from './permissions.js';
+import { ensureSeeded, getGrants, updateGrants } from './permissions.js';
 import { syncMember } from './staff.js';
 import { ADMIN_ROLE, CURATOR_ROLE, GUILD, SUPPORT_ROLE, config, memberInput } from '../test-helpers.js';
 
@@ -57,5 +57,22 @@ describe('grants', () => {
         ).rejects.toMatchObject({ code: 'FORBIDDEN' });
       }
       expect(await getGrants(db, GUILD, 'SUPPORT')).toEqual([]);
+    }));
+});
+
+describe('ensureSeeded', () => {
+  it('creates the default CURATOR grants on an empty guild', () =>
+    withTestDb(async (db) => {
+      await ensureSeeded(db, GUILD);
+      expect((await getGrants(db, GUILD, 'CURATOR')).sort()).toEqual([...DEFAULT_GRANTS.CURATOR].sort());
+    }));
+
+  it('does not restore a grant an admin removed', () =>
+    withTestDb(async (db) => {
+      await ensureSeeded(db, GUILD);
+      const admin = (await syncMember({ db, config }, memberInput(1, [ADMIN_ROLE])))!;
+      await updateGrants(db, { userId: admin.userId, level: 'ADMIN' }, 'CURATOR', ['reports.view']);
+      await ensureSeeded(db, GUILD);
+      expect(await getGrants(db, GUILD, 'CURATOR')).toEqual(['reports.view']);
     }));
 });

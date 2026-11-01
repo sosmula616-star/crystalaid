@@ -19,7 +19,7 @@ pnpm --dir apps/api run api
 pnpm --dir apps/api run worker
 ```
 
-Тесты: `pnpm test` (из корня).
+Сборка не нужна: сервисы запускаются через tsx. Тесты: `pnpm test` (из корня).
 
 ## Документация
 

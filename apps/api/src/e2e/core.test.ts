@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_GRANTS } from '@crystalaid/domain';
 import { AuditListResponse, MeResponse, PermissionsResponse, StaffListResponse } from '@crystalaid/contracts';
+import { ensureSeeded } from '../services/permissions.js';
 import { consumeBatch } from '../worker/consumer.js';
 import { withApp, type AppContext } from '../testing/harness.js';
 import {
@@ -65,6 +67,9 @@ const get = (ctx: AppContext, url: string, token: string) =>
 describe('core flow over real Redis and PostgreSQL', () => {
   it('snapshot, login, staff list, permissions, role removal, audit', () =>
     withApp({ redis }, async (ctx) => {
+      // 0. First start seeds the spec defaults.
+      await ensureSeeded(ctx.db, GUILD);
+
       // 1. The bot publishes the full member list in two parts.
       const start = Date.now() - 60_000;
       const base = { type: 'member.snapshot', guildId: GUILD, snapshotId: 'snap-1', parts: 2 };
@@ -89,6 +94,8 @@ describe('core flow over real Redis and PostgreSQL', () => {
       const me = MeResponse.parse((await get(ctx, '/me', curatorToken)).json());
       expect(me.level).toBe('CURATOR');
       expect(me.user.discordId).toBe(discordId(CURATOR));
+      // Default rights from the first-start seed, no admin PATCH needed.
+      expect([...me.permissions].sort()).toEqual([...DEFAULT_GRANTS.CURATOR].sort());
 
       // 3. GET /staff shows the roster created by the snapshot.
       const staffRes = await get(ctx, '/staff', curatorToken);
@@ -142,7 +149,7 @@ describe('core flow over real Redis and PostgreSQL', () => {
       expect(actions).toHaveLength(5);
       expect(actions[0]).toBe('staff.deactivated');
       const grants = audit.items.find((i) => i.action === 'grants.updated');
-      expect(grants?.data).toEqual({ level: 'CURATOR', before: [], after: ['reports.view', 'staff.note'] });
+      expect(grants?.data).toEqual({ level: 'CURATOR', before: [...DEFAULT_GRANTS.CURATOR].sort(), after: ['reports.view', 'staff.note'] });
       expect(grants?.actorUserId).toBe(staff.items.find((s) => s.discordId === discordId(ADMIN))?.userId);
     }));
 });

@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { Redis } from 'ioredis';
 import { loadEnv, loadServerConfig, type Env, type ServerConfig } from '@crystalaid/config';
 import { createDb, type Db } from '@crystalaid/database';
+import { ensureSeeded } from '../services/permissions.js';
 import { createDiscordClient, type DiscordClient } from '../discord/client.js';
 import { consoleLog, type Logger } from '../log.js';
 import { registerAuth } from './auth.js';
@@ -111,6 +112,7 @@ export async function runApi(): Promise<void> {
   const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 1, connectTimeout: 500 });
   redis.on('error', (err) => log.error('redis error', { error: err.message }));
 
+  await ensureSeeded(db, config.guildId);
   const app = await buildServer({ env, config, db, redis, discord: createDiscordClient(env, log) });
   const shutdown = createShutdown(
     {
