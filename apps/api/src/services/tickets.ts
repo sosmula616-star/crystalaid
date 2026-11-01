@@ -331,6 +331,13 @@ export async function claimTicket(
         and(eq(tickets.guildId, config.guildId), eq(tickets.status, 'claimed'), eq(tickets.claimedBy, support.id)),
       )
       .limit(1);
+    if (inWork?.id === ticketId) {
+      const [req] = await tx
+        .select({ discordId: users.discordId })
+        .from(users)
+        .where(eq(users.id, ticket.requesterId));
+      return { result: 'yours' as const, ticket, requesterDiscordId: req!.discordId };
+    }
     if (inWork) return { result: 'busy' as const };
     const [attempt] = await tx
       .update(ticketChallenges)
@@ -398,7 +405,7 @@ export async function addMessage(
       .select()
       .from(tickets)
       .where(and(eq(tickets.id, ticketId), eq(tickets.guildId, config.guildId)))
-      .for('share');
+      .for('update');
     if (!ticket) throw new AppError('NOT_FOUND', 'Not found', 404);
     const [author] = await tx.select().from(users).where(eq(users.discordId, authorDiscordId));
     const isRequester = author?.id === ticket.requesterId;
