@@ -5,6 +5,7 @@ export { IconButton, type IconButtonProps } from './components/IconButton/IconBu
 export { Avatar, initialsOf, type AvatarProps } from './components/Avatar/Avatar.js';
 export { Badge, type BadgeProps } from './components/Badge/Badge.js';
 export { Card, type CardProps } from './components/Card/Card.js';
+export { Table, type TableColumn, type TableProps } from './components/Table/Table.js';
 export { StatCard, type StatCardProps } from './components/StatCard/StatCard.js';
 export { ProgressBar, type ProgressBarProps } from './components/ProgressBar/ProgressBar.js';
 export { Skeleton, type SkeletonProps } from './components/Skeleton/Skeleton.js';
