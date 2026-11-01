@@ -12,6 +12,7 @@ export default defineConfig({
           name: 'node',
           globalSetup: ['./vitest.global-setup.ts'],
           include: ['{apps,packages}/**/*.test.ts'],
+          exclude: ['**/node_modules/**', 'apps/activity/**'],
         },
       },
       {
@@ -21,7 +22,7 @@ export default defineConfig({
           name: 'dom',
           environment: 'jsdom',
           setupFiles: ['./packages/design-system/vitest.dom-setup.ts'],
-          include: ['{apps/activity,packages/design-system}/**/*.test.tsx'],
+          include: ['apps/activity/**/*.test.{ts,tsx}', 'packages/design-system/**/*.test.tsx'],
         },
       },
     ],

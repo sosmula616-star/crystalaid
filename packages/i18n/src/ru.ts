@@ -20,6 +20,19 @@ export const ru = {
   'theme.emerald': 'Изумруд',
   'theme.graphite': 'Графит',
   'theme.raspberry': 'Малина',
+  'auth.logoAlt': 'Логотип CrystalAid',
+  'auth.signingIn': 'Выполняется вход',
+  'auth.retry': 'Повторить',
+  'auth.notStaff.title': 'Нет доступа',
+  'auth.notStaff.description': 'У вас нет доступа к панели сотрудников.',
+  'auth.guildRequired.title': 'Откройте панель на сервере',
+  'auth.guildRequired.description': 'Панель работает только внутри сервера. Запустите её в голосовом канале сервера.',
+  'auth.invalidInstance.title': 'Запустите панель заново',
+  'auth.invalidInstance.description': 'Этот сеанс панели недействителен. Закройте её и запустите снова.',
+  'auth.unavailable.title': 'Не удалось подключиться',
+  'auth.unavailable.description': 'Нет связи с сервером или Discord. Проверьте соединение и повторите попытку.',
+  'auth.error.title': 'Не удалось войти',
+  'auth.error.description': 'Что-то пошло не так. Повторите попытку.',
 } as const;
 
 export type MessageKey = keyof typeof ru;

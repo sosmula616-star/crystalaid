@@ -1,0 +1,132 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { MeResponse } from '@crystalaid/contracts';
+import { ApiError, type ApiClient } from '../api/client.js';
+import { AuthGate } from './AuthGate.js';
+import type { Session } from './session.js';
+
+const ME: MeResponse = {
+  user: { id: 'u1', discordId: '123456789012345678', username: 'alice', avatar: null },
+  level: 'SUPPORT',
+  position: null,
+  status: 'active',
+  tokenBalance: 5,
+  permissions: [],
+};
+
+function setup(opts: { start?: () => Promise<void>; me?: () => Promise<MeResponse>; locale?: string } = {}) {
+  const session: Session = {
+    start: vi.fn(opts.start ?? (async () => {})),
+    refresh: vi.fn(async () => {}),
+    token: () => 'tok',
+  };
+  const api = {
+    get: vi.fn(opts.me ?? (async () => ME)),
+    post: vi.fn(),
+    patch: vi.fn(),
+  } as unknown as ApiClient;
+  render(
+    <AuthGate session={session} api={api} discordLocale={() => opts.locale ?? 'ru'}>
+      {(me) => <p>hello {me.user.username}</p>}
+    </AuthGate>,
+  );
+  return { session, api };
+}
+
+describe('AuthGate', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('shows the logo and an indicator while signing in, then the children with /me', async () => {
+    vi.spyOn(navigator, 'language', 'get').mockReturnValue('ru-RU'); // before Discord answers, the browser language is used
+    let finish!: () => void;
+    const { api } = setup({ start: () => new Promise<void>((r) => (finish = r)) });
+    expect(screen.getByRole('img', { name: 'Логотип CrystalAid' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('Выполняется вход');
+    finish();
+    expect(await screen.findByText('hello alice')).toBeTruthy();
+    expect(api.get).toHaveBeenCalledWith('/me', expect.anything());
+    expect(document.documentElement.lang).toBe('ru');
+  });
+
+  it('uses English text and document language for an English Discord locale', async () => {
+    setup({ locale: 'en-US' });
+    await screen.findByText('hello alice');
+    expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('shows the server message on NOT_STAFF and no retry button', async () => {
+    setup({
+      me: async () => {
+        throw new ApiError('NOT_STAFF', 'No access: the support role is missing', 403);
+      },
+    });
+    expect(await screen.findByText('Нет доступа')).toBeTruthy();
+    expect(screen.getByText('No access: the support role is missing')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Повторить' })).toBeNull();
+  });
+
+  it('shows the NOT_STAFF screen when the login itself is refused', async () => {
+    setup({
+      start: async () => {
+        throw new ApiError('NOT_STAFF', 'No access to the staff panel', 403);
+      },
+    });
+    expect(await screen.findByText('No access to the staff panel')).toBeTruthy();
+  });
+
+  it('shows its own screen for GUILD_REQUIRED', async () => {
+    setup({
+      start: async () => {
+        throw new ApiError('GUILD_REQUIRED', 'Open the Activity in a server', 400);
+      },
+    });
+    expect(await screen.findByText('Откройте панель на сервере')).toBeTruthy();
+    expect(screen.queryByText('Open the Activity in a server')).toBeNull();
+  });
+
+  it('shows its own screen for INVALID_INSTANCE', async () => {
+    setup({
+      start: async () => {
+        throw new ApiError('INVALID_INSTANCE', 'Invalid activity instance', 403);
+      },
+    });
+    expect(await screen.findByText('Запустите панель заново')).toBeTruthy();
+  });
+
+  it.each([
+    ['DISCORD_UNAVAILABLE', new ApiError('DISCORD_UNAVAILABLE', 'Discord is down', 502)],
+    ['NETWORK', new ApiError('NETWORK', 'Failed to fetch', 0)],
+    ['an SDK failure', new Error('Discord client closed')],
+  ])('shows the connection screen with a retry button for %s', async (_name, error) => {
+    setup({
+      start: async () => {
+        throw error;
+      },
+    });
+    expect(await screen.findByText('Не удалось подключиться')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Повторить' })).toBeTruthy();
+  });
+
+  it('runs the sign-in again when Retry is pressed', async () => {
+    const start = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new ApiError('DISCORD_UNAVAILABLE', 'down', 502))
+      .mockResolvedValue(undefined);
+    const { api } = setup({ start });
+    await userEvent.click(await screen.findByRole('button', { name: 'Повторить' }));
+    expect(await screen.findByText('hello alice')).toBeTruthy();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a failed /me', async () => {
+    const me = vi
+      .fn<() => Promise<MeResponse>>()
+      .mockRejectedValueOnce(new ApiError('NETWORK', 'offline', 0))
+      .mockResolvedValue(ME);
+    setup({ me });
+    await userEvent.click(await screen.findByRole('button', { name: 'Повторить' }));
+    await waitFor(() => expect(screen.getByText('hello alice')).toBeTruthy());
+  });
+});
