@@ -3,7 +3,7 @@ import { ZodError } from 'zod';
 import { AppError, type ErrorCode } from '@crystalaid/contracts';
 
 export interface ErrorBody {
-  error: { code: ErrorCode; message: string; requestId: string };
+  error: { code: ErrorCode; message: string; requestId: string; reason?: string };
 }
 
 const CLIENT_ERRORS: Record<number, [ErrorCode, string]> = {
@@ -20,9 +20,10 @@ export function registerErrorHandling(app: FastifyInstance): void {
     let status: number;
     let code: ErrorCode;
     let message: string;
+    let reason: string | undefined;
 
     if (err instanceof AppError) {
-      ({ status, code, message } = err);
+      ({ status, code, message, reason } = err);
     } else if (err instanceof ZodError) {
       status = 400;
       code = 'VALIDATION_ERROR';
@@ -36,7 +37,7 @@ export function registerErrorHandling(app: FastifyInstance): void {
       code = 'INTERNAL';
       message = 'Internal server error';
     }
-    const body: ErrorBody = { error: { code, message, requestId: request.id } };
+    const body: ErrorBody = { error: { code, message, requestId: request.id, ...(reason === undefined ? {} : { reason }) } };
     return reply.status(status).send(body);
   });
 

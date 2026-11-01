@@ -1,0 +1,54 @@
+.icon {
+  display: inline-flex;
+  color: var(--color-muted);
+}
+
+.content {
+  z-index: var(--layer-popper);
+  min-width: var(--radix-select-trigger-width);
+  max-height: min(var(--radix-select-content-available-height), 320px);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-3);
+  background: var(--color-surface-elevated);
+  color: var(--color-foreground);
+  animation: fade-in var(--motion-fast) ease-out;
+}
+
+.viewport {
+  padding: var(--space-1);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-2);
+  font: var(--text-body);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.item[data-highlighted] {
+  background: var(--color-surface-hover);
+}
+
+.item[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.indicator {
+  display: inline-flex;
+  color: var(--color-primary);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}

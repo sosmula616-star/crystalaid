@@ -1,0 +1,18 @@
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: var(--layer-dialog);
+  width: min(480px, calc(100dvw - var(--space-6)));
+  max-height: calc(100dvh - var(--space-6));
+  border-radius: var(--radius-6);
+  transform: translate(-50%, -50%);
+  animation: pop-in var(--motion-base) ease-out;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + var(--space-2)));
+  }
+}

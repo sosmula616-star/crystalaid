@@ -1,0 +1,112 @@
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  max-width: 100%;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-3);
+  font: var(--text-label);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast),
+    border-color var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+/* Drawn smaller, but the hit area stays at the touch target size. */
+.sm {
+  min-height: var(--space-7);
+  padding: 0 var(--space-3);
+}
+
+.sm::before {
+  content: '';
+  position: absolute;
+  inset: calc((var(--space-7) - var(--touch-target)) / 2) 0;
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primary {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.primary:hover:not([aria-disabled='true']):not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 88%, var(--color-foreground));
+}
+
+.secondary {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-border);
+  color: var(--color-foreground);
+}
+.secondary:hover:not([aria-disabled='true']):not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--color-foreground);
+}
+.ghost:hover:not([aria-disabled='true']):not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.danger {
+  background: var(--color-danger);
+  color: var(--color-background);
+}
+.danger:hover:not([aria-disabled='true']):not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 88%, var(--color-foreground));
+}
+
+.button:active:not([aria-disabled='true']):not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.loading {
+  cursor: progress;
+}
+
+/* The label keeps its space, so the button does not change width. */
+.loading .label {
+  opacity: 0;
+}
+
+.spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin: calc(var(--space-4) / -2) 0 0 calc(var(--space-4) / -2);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin var(--motion-spin) linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

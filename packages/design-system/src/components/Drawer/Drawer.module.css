@@ -1,0 +1,28 @@
+/* A side sheet. It takes the whole screen width when that is narrower than
+   the sheet, and keeps its content clear of the safe-area insets. */
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--layer-dialog);
+  width: min(420px, 100dvw);
+  padding-top: max(var(--space-5), env(safe-area-inset-top));
+  padding-right: max(var(--space-5), env(safe-area-inset-right));
+  padding-bottom: max(var(--space-5), env(safe-area-inset-bottom));
+  padding-left: max(var(--space-5), env(safe-area-inset-left));
+  border-width: 0 0 0 1px;
+  animation: slide-in var(--motion-slow) ease-out;
+}
+
+@media (max-width: 480px) {
+  .drawer {
+    border-left-width: 0;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}

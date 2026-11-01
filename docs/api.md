@@ -6,6 +6,8 @@
 { "error": { "code": "FORBIDDEN", "message": "Not allowed", "requestId": "..." } }
 ```
 
+У ошибки может быть необязательное поле `reason`: машиночитаемая причина (`snake_case`). `message` всегда английский и предназначен для логов; клиент не показывает его, а сопоставляет `code` и `reason` со своими переводами и при неизвестной причине показывает общий текст. Сейчас `reason` есть только у `NOT_STAFF`: `support_role_missing` (куратору не хватает роли поддержки) и `not_in_branch` (все остальные случаи).
+
 Коды: `UNAUTHORIZED`, `TOKEN_EXPIRED`, `FORBIDDEN`, `NOT_STAFF`, `NOT_FOUND`, `VALIDATION_ERROR`, `RATE_LIMITED`, `SELF_ACTION`, `GUILD_REQUIRED`, `INVALID_INSTANCE`, `DISCORD_UNAVAILABLE`, `INTERNAL`. Схемы запросов и ответов: `packages/contracts/src/api.ts`.
 
 Сессия: заголовок `Authorization: Bearer <sessionToken>`.
@@ -35,7 +37,7 @@
 |---|---|---|
 | `INVALID_INSTANCE` | 403 | экземпляр неизвестен, чужая гильдия, пользователя нет в экземпляре |
 | `GUILD_REQUIRED` | 400 | Activity открыта вне сервера |
-| `NOT_STAFF` | 403 | нет роли стаффа, не участник гильдии, доступ снят. Куратору без роли поддержки сообщение говорит, что роли поддержки не хватает |
+| `NOT_STAFF` | 403 | нет роли стаффа, не участник гильдии, доступ снят. Куратору без роли поддержки сообщение говорит, что роли поддержки не хватает, а `reason` равен `support_role_missing`; в остальных случаях `reason` равен `not_in_branch` |
 | `DISCORD_UNAVAILABLE` | 503 | Discord ответил 429, 5xx или не ответил за 5 секунд |
 
 Права и уровень берутся из базы на каждый запрос, поэтому снятие роли действует сразу: старый токен получает `403 NOT_STAFF`.

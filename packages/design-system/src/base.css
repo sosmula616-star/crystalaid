@@ -1,0 +1,19 @@
+/* The page itself: no browser margin, so the app measures the real window width. */
+html {
+  /* Follows the browser and the user's text size setting; type tokens are in rem. */
+  font-size: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+body {
+  font: var(--text-body);
+  /* The `font` shorthand resets this property, so it is set again after it. */
+  font-variant-numeric: tabular-nums;
+}
