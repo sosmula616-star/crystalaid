@@ -14,7 +14,7 @@ export function registerMe(app: FastifyInstance, deps: { db: Db; config: ServerC
       .from(staffMembers)
       .innerJoin(users, eq(users.id, staffMembers.userId))
       .where(and(eq(staffMembers.guildId, config.guildId), eq(staffMembers.userId, actor.userId)));
-    if (!row) throw new AppError('NOT_STAFF', 'No access to the staff panel', 403);
+    if (!row) throw new AppError('NOT_STAFF', 'No access to the staff panel', 403, 'not_in_branch');
     const permissions: Permission[] =
       actor.level === 'ADMIN' ? [...PERMISSIONS] : PERMISSIONS.filter((p) => actor.grants.includes(p));
     return {

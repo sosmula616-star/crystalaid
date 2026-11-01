@@ -125,10 +125,16 @@ export function Shell({ me, t, locale = 'ru', onLocaleChange = noLocaleChange, o
     [me, t, locale, onLocaleChange],
   );
   // A compact action belongs to the section that set it; the new section sets its own.
-  const selectSection = useCallback((id: SectionId) => {
-    setCompactAction(null);
-    setActiveId(id);
-  }, []);
+  // Choosing the section that is already open changes nothing, so its action stays.
+  const activeSectionId = active?.id;
+  const selectSection = useCallback(
+    (id: SectionId) => {
+      if (id === activeSectionId) return;
+      setCompactAction(null);
+      setActiveId(id);
+    },
+    [activeSectionId],
+  );
   const focusHeading = useCallback(() => headingRef.current?.focus(), []);
   const compact = mode === 'compact';
   const nav = { sections: available, activeId: active?.id ?? FIRST_SECTION, onSelect: selectSection, t };

@@ -50,11 +50,31 @@ test('the marker scan finds a dev marker (positive control)', () => {
   }
 });
 
+test('the build fails with a clear message when VITE_DISCORD_CLIENT_ID is empty', async () => {
+  test.setTimeout(60_000);
+  const out = mkdtempSync(join(tmpdir(), 'crystalaid-empty-'));
+  const previous = process.env.VITE_DISCORD_CLIENT_ID;
+  process.env.VITE_DISCORD_CLIENT_ID = '';
+  try {
+    const { build } = await import('vite');
+    await expect(
+      build({ root: appDir, mode: 'production', logLevel: 'silent', build: { outDir: out, emptyOutDir: true } }),
+    ).rejects.toThrow(/VITE_DISCORD_CLIENT_ID is empty/);
+  } finally {
+    if (previous === undefined) delete process.env.VITE_DISCORD_CLIENT_ID;
+    else process.env.VITE_DISCORD_CLIENT_ID = previous;
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('production build holds no kit, no dev mock, no outside addresses', async () => {
   test.setTimeout(120_000);
   const out = mkdtempSync(join(tmpdir(), 'crystalaid-dist-'));
   const previousEnv = process.env.NODE_ENV;
+  const previousClientId = process.env.VITE_DISCORD_CLIENT_ID;
   process.env.NODE_ENV = 'production';
+  // The build refuses an empty id; the bundle check needs any value.
+  process.env.VITE_DISCORD_CLIENT_ID = 'dummy-client-id';
   try {
     const { build } = await import('vite');
     await build({ root: appDir, mode: 'production', logLevel: 'silent', build: { outDir: out, emptyOutDir: true } });
@@ -81,6 +101,8 @@ test('production build holds no kit, no dev mock, no outside addresses', async (
   } finally {
     if (previousEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousEnv;
+    if (previousClientId === undefined) delete process.env.VITE_DISCORD_CLIENT_ID;
+    else process.env.VITE_DISCORD_CLIENT_ID = previousClientId;
     rmSync(out, { recursive: true, force: true });
   }
 });

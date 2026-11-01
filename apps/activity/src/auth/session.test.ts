@@ -77,16 +77,24 @@ describe('session', () => {
     expect(sdk.ready).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['ready', 'authorize'] as const)('reports a stalled %s as NETWORK after the timeout', async (step) => {
+  it.each([
+    ['ready', 15_000],
+    ['authorize', 300_000],
+    ['authenticate', 15_000],
+  ] as const)('reports a stalled %s as NETWORK after its limit', async (step, limit) => {
     vi.useFakeTimers();
     try {
       const { sdk, login } = setup();
       (sdk[step] as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise(() => {}));
-      const session = createSession({ sdk, login, timeoutMs: 15_000 });
+      const session = createSession({ sdk, login });
       const result = session.start().catch((e: unknown) => e);
-      await vi.advanceTimersByTimeAsync(15_000);
+      let settled = false;
+      void result.then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(limit - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
       expect(await result).toMatchObject({ code: 'NETWORK' });
-      expect(login).not.toHaveBeenCalled();
+      if (step !== 'authenticate') expect(login).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

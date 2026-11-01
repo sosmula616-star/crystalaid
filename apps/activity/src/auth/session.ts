@@ -19,8 +19,10 @@ export interface DiscordPort {
 export interface SessionDeps {
   sdk: DiscordPort;
   login(code: string, instanceId: string): Promise<ActivityAuthResponse>;
-  /** Limit for the Discord handshake steps `ready` and `authorize`. Default 15 s. */
+  /** Limit for the handshake steps `ready` and `authenticate`. Default 15 s. */
   timeoutMs?: number;
+  /** Limit for `authorize`, which may wait for a person reading Discord's consent dialog. Default 5 min. */
+  authorizeTimeoutMs?: number;
 }
 
 export interface Session {
@@ -31,16 +33,16 @@ export interface Session {
   token(): string | null;
 }
 
-export function createSession({ sdk, login, timeoutMs = 15_000 }: SessionDeps): Session {
-  const limited = <T>(promise: Promise<T>, step: string) =>
-    withTimeout(promise, timeoutMs, () => new ApiError('NETWORK', `Discord did not answer: ${step}`, 0));
+export function createSession({ sdk, login, timeoutMs = 15_000, authorizeTimeoutMs = 300_000 }: SessionDeps): Session {
+  const limited = <T>(promise: Promise<T>, step: string, limit = timeoutMs) =>
+    withTimeout(promise, limit, () => new ApiError('NETWORK', `Discord did not answer: ${step}`, 0));
   let token: string | null = null;
   let isReady = false;
   let isAuthenticated = false;
   let refreshing: Promise<void> | null = null;
 
   async function signIn(): Promise<ActivityAuthResponse> {
-    const code = await limited(sdk.authorize(), 'authorize');
+    const code = await limited(sdk.authorize(), 'authorize', authorizeTimeoutMs);
     const response = await login(code, sdk.instanceId);
     token = response.sessionToken;
     return response;
@@ -54,7 +56,7 @@ export function createSession({ sdk, login, timeoutMs = 15_000 }: SessionDeps): 
       }
       const response = await signIn();
       if (!isAuthenticated) {
-        await sdk.authenticate(response.discordAccessToken);
+        await limited(sdk.authenticate(response.discordAccessToken), 'authenticate');
         isAuthenticated = true;
       }
     },

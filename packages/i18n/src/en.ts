@@ -28,6 +28,8 @@ export const en: Record<MessageKey, string> = {
   'auth.retry': 'Retry',
   'auth.notStaff.title': 'No access',
   'auth.notStaff.description': 'You do not have access to the staff panel.',
+  'auth.notStaff.supportRoleMissing': 'A curator also needs the support role. Ask an administrator to grant it.',
+  'auth.notStaff.notInBranch': 'You do not have a staff role on this server.',
   'auth.guildRequired.title': 'Open the panel in a server',
   'auth.guildRequired.description': 'The panel only works inside a server. Launch it from a voice channel of the server.',
   'auth.invalidInstance.title': 'Restart the panel',

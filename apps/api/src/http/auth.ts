@@ -49,6 +49,15 @@ const NOT_STAFF_MESSAGE = 'No access to the staff panel';
 const SUPPORT_MISSING_MESSAGE =
   'No access to the staff panel: the support role is missing (a curator also needs the support role)';
 
+/** NOT_STAFF with a reason the client can translate; the message stays English for logs and other clients. */
+const notStaff = (supportMissing: boolean) =>
+  new AppError(
+    'NOT_STAFF',
+    supportMissing ? SUPPORT_MISSING_MESSAGE : NOT_STAFF_MESSAGE,
+    403,
+    supportMissing ? 'support_role_missing' : 'not_in_branch',
+  );
+
 const digest = (value: string) => createHash('sha256').update(value).digest();
 
 export interface AuthDeps {
@@ -89,7 +98,7 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
         : [];
       const supportMissing =
         last?.type === 'deactivated' && (last.data as { supportRoleMissing?: boolean } | null)?.supportRoleMissing === true;
-      throw new AppError('NOT_STAFF', supportMissing ? SUPPORT_MISSING_MESSAGE : NOT_STAFF_MESSAGE, 403);
+      throw notStaff(supportMissing);
     }
     request.actor = {
       userId: claims.userId,
@@ -145,7 +154,7 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
       // `at` and wins; one applied earlier than `at` was already reflected in the roles we read.
       const at = new Date();
       const member = await discord.getMember(guildId, me.id);
-      if (!member) throw new AppError('NOT_STAFF', 'No access to the staff panel', 403);
+      if (!member) throw notStaff(false);
 
       const staff = await syncMember(
         { db, config },
@@ -156,7 +165,7 @@ export function registerAuth(app: FastifyInstance, deps: AuthDeps): void {
           !member.roles.some((id) => config.roles.support.includes(id)) &&
           member.roles.some((id) => config.roles.curator.includes(id)) &&
           !member.roles.some((id) => config.roles.admin.includes(id));
-        throw new AppError('NOT_STAFF', supportMissing ? SUPPORT_MISSING_MESSAGE : NOT_STAFF_MESSAGE, 403);
+        throw notStaff(supportMissing);
       }
 
       const sessionToken = await signSession({ userId: staff.userId, discordUserId: me.id }, env.JWT_SECRET);

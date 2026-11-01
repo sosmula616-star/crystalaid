@@ -25,6 +25,8 @@ export const ru = {
   'auth.retry': 'Повторить',
   'auth.notStaff.title': 'Нет доступа',
   'auth.notStaff.description': 'У вас нет доступа к панели сотрудников.',
+  'auth.notStaff.supportRoleMissing': 'Куратору помимо роли куратора нужна роль саппорта. Попросите администратора выдать её.',
+  'auth.notStaff.notInBranch': 'У вас нет роли сотрудника на этом сервере.',
   'auth.guildRequired.title': 'Откройте панель на сервере',
   'auth.guildRequired.description': 'Панель работает только внутри сервера. Запустите её в голосовом канале сервера.',
   'auth.invalidInstance.title': 'Запустите панель заново',

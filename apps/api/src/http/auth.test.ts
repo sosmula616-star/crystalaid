@@ -123,6 +123,7 @@ describe('POST /auth/activity', () => {
         expect(res.json().error.code).toBe('NOT_STAFF');
         // only the curator without the support role is told what is missing
         expect(/support role is missing/.test(res.json().error.message)).toBe(n === 2);
+        expect(res.json().error.reason).toBe(n === 2 ? 'support_role_missing' : 'not_in_branch');
       }
       expect(await db.select().from(staffMembers)).toHaveLength(0);
     }));
@@ -371,6 +372,7 @@ describe('guards', () => {
       res = await get(ctx, '/whoami', token);
       expect(res.statusCode).toBe(403);
       expect(res.json().error.code).toBe('NOT_STAFF');
+      expect(res.json().error.reason).toBe('not_in_branch');
     }));
 
   it('requireStaff says that the support role is missing for a curator who lost it, and only then', () =>
@@ -384,10 +386,12 @@ describe('guards', () => {
       expect(a.statusCode).toBe(403);
       expect(a.json().error.code).toBe('NOT_STAFF');
       expect(a.json().error.message).toMatch(/support role is missing/);
+      expect(a.json().error.reason).toBe('support_role_missing');
       const b = await get(ctx, '/whoami', other.token);
       expect(b.statusCode).toBe(403);
       expect(b.json().error.code).toBe('NOT_STAFF');
       expect(b.json().error.message).not.toMatch(/support role/);
+      expect(b.json().error.reason).toBe('not_in_branch');
     }));
 
   it('answers TOKEN_EXPIRED for an expired token and UNAUTHORIZED for a forged or missing one', () =>

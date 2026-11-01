@@ -13,7 +13,9 @@ const Thing = {
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-const errorBody = (code: string, message = 'msg') => ({ error: { code, message, requestId: 'req-1' } });
+const errorBody = (code: string, message = 'msg', reason?: string) => ({
+  error: { code, message, requestId: 'req-1', ...(reason ? { reason } : {}) },
+});
 const auth = (init: RequestInit | undefined) => (init?.headers as Record<string, string>).authorization;
 
 function setup(handler: (init: RequestInit, call: number) => Response | Promise<Response>) {
@@ -54,6 +56,12 @@ describe('api client', () => {
     expect((post.headers as Record<string, string>)['content-type']).toBe('application/json');
     expect(patch.method).toBe('PATCH');
     expect(patch.body).toBe('{"b":2}');
+  });
+
+  it('keeps the machine-readable reason of an error', async () => {
+    const { client } = setup(() => json(403, errorBody('NOT_STAFF', 'No access', 'support_role_missing')));
+    const err = await client.get('/x', Thing).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'NOT_STAFF', reason: 'support_role_missing' });
   });
 
   it('turns an API error into ApiError with its code, status and request id', async () => {

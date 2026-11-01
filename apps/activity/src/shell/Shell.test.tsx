@@ -165,6 +165,15 @@ describe('Shell', () => {
       expect(screen.queryByRole('button', { name: 'Утечка' })).toBeNull();
     });
 
+    it('keeps the compact action when the active section is selected again', async () => {
+      const { user } = setup({ sections: withCounter() }, 1400);
+      await user.click(within(navigation()).getByRole('button', { name: 'Смена' }));
+      await screen.findByRole('button', { name: 'count 0' });
+      await user.click(within(navigation()).getByRole('button', { name: 'Смена' }));
+      resizeTo(200);
+      expect(screen.getByRole('button', { name: 'Главное' })).toBeTruthy();
+    });
+
     it('keeps local state and the active section from wide to compact and back, and shows the section action', async () => {
       const { user } = setup({ sections: withCounter() }, 1400);
       await user.click(within(navigation()).getByRole('button', { name: 'Смена' }));

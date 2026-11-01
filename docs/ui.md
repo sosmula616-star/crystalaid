@@ -27,6 +27,6 @@ Avatar, Badge, Button, Card, Checkbox, Drawer, Dropdown, EmptyState, ErrorState,
 
 ## Разработка без Discord
 
-`pnpm --dir apps/activity run dev:mock` запускает Activity с подставным SDK и ответами API (`src/dev/mock.ts`). Параметры адреса: `?level=SUPPORT|CURATOR|ADMIN`, `?name=long`, `?error=NOT_STAFF` (или другой код входа), `?pip=1|0`, `?locale=en-US`. `window.__crystalaidLayout(mode)` отправляет режим окна вручную (1 — поверх чата, 0 — обычный).
+`pnpm --dir apps/activity run dev:mock` запускает Activity с подставным SDK и ответами API (`src/dev/mock.ts`). Параметры адреса: `?level=SUPPORT|CURATOR|ADMIN`, `?name=long`, `?error=NOT_STAFF` (или другой код входа; для `NOT_STAFF` ещё `&reason=support_role_missing`), `?pip=1|0`, `?locale=en-US`. `window.__crystalaidLayout(mode)` отправляет режим окна вручную (1 — поверх чата, 0 — обычный).
 
 Витрина `/kit` показывает все компоненты, состояния и темы. Подставной режим и витрина работают только при `import.meta.env.DEV` и в сборку не попадают; это проверяет `e2e/bundle.spec.ts`.

@@ -69,15 +69,35 @@ describe('AuthGate', () => {
     expect(document.documentElement.lang).toBe('en');
   });
 
-  it('shows the server message on NOT_STAFF and no retry button', async () => {
+  it('explains a missing support role in Russian, not with the server text', async () => {
     setup({
       me: async () => {
-        throw new ApiError('NOT_STAFF', 'No access: the support role is missing', 403);
+        throw new ApiError('NOT_STAFF', 'No access: the support role is missing', 403, undefined, 'support_role_missing');
       },
     });
     expect(await screen.findByText('Нет доступа')).toBeTruthy();
-    expect(screen.getByText('No access: the support role is missing')).toBeTruthy();
+    expect(screen.getByText(/нужна роль саппорта/)).toBeTruthy();
+    expect(screen.queryByText('No access: the support role is missing')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Повторить' })).toBeNull();
+  });
+
+  it('says the person is not in the branch for reason not_in_branch', async () => {
+    setup({
+      me: async () => {
+        throw new ApiError('NOT_STAFF', 'No access to the staff panel', 403, undefined, 'not_in_branch');
+      },
+    });
+    expect(await screen.findByText(/нет роли сотрудника/)).toBeTruthy();
+  });
+
+  it('falls back to a generic text for an unknown or missing reason', async () => {
+    setup({
+      me: async () => {
+        throw new ApiError('NOT_STAFF', 'Server words', 403, undefined, 'something_new');
+      },
+    });
+    expect(await screen.findByText('У вас нет доступа к панели сотрудников.')).toBeTruthy();
+    expect(screen.queryByText('Server words')).toBeNull();
   });
 
   it('shows the NOT_STAFF screen when the login itself is refused', async () => {
@@ -86,7 +106,8 @@ describe('AuthGate', () => {
         throw new ApiError('NOT_STAFF', 'No access to the staff panel', 403);
       },
     });
-    expect(await screen.findByText('No access to the staff panel')).toBeTruthy();
+    expect(await screen.findByText('У вас нет доступа к панели сотрудников.')).toBeTruthy();
+    expect(screen.queryByText('No access to the staff panel')).toBeNull();
   });
 
   it('shows its own screen for GUILD_REQUIRED', async () => {

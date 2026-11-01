@@ -1,7 +1,7 @@
 import type { Ref } from 'react';
 import { Badge } from '@crystalaid/design-system';
 import type { MeResponse } from '@crystalaid/contracts';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo-160.png';
 import type { Translate } from './context.js';
 import styles from './TopBar.module.css';
 
@@ -18,7 +18,7 @@ export function TopBar({ title, me, t, headingRef }: TopBarProps) {
   return (
     <header className={styles.bar}>
       <img className={styles.logo} src={logoUrl} alt={t('auth.logoAlt')} />
-      <h1 ref={headingRef} tabIndex={-1} className={styles.title}>
+      <h1 ref={headingRef} tabIndex={-1} className={styles.title} title={title}>
         {title}
       </h1>
       <div className={styles.user}>

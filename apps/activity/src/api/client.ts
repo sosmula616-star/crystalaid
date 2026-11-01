@@ -11,13 +11,16 @@ export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
   readonly requestId?: string;
+  /** Machine-readable detail from the server (`support_role_missing`, ...); the UI maps it to its own text. */
+  readonly reason?: string;
 
-  constructor(code: string, message: string, status: number, requestId?: string) {
+  constructor(code: string, message: string, status: number, requestId?: string, reason?: string) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.status = status;
     if (requestId !== undefined) this.requestId = requestId;
+    if (reason !== undefined) this.reason = reason;
   }
 }
 
@@ -42,15 +45,21 @@ interface ErrorEnvelope {
   code: string;
   message: string;
   requestId?: string;
+  reason?: string;
 }
 
 function readEnvelope(body: unknown): ErrorEnvelope | null {
   if (typeof body !== 'object' || body === null) return null;
   const error = (body as { error?: unknown }).error;
   if (typeof error !== 'object' || error === null) return null;
-  const { code, message, requestId } = error as Record<string, unknown>;
+  const { code, message, requestId, reason } = error as Record<string, unknown>;
   if (typeof code !== 'string' || typeof message !== 'string') return null;
-  return typeof requestId === 'string' ? { code, message, requestId } : { code, message };
+  return {
+    code,
+    message,
+    ...(typeof requestId === 'string' ? { requestId } : {}),
+    ...(typeof reason === 'string' ? { reason } : {}),
+  };
 }
 
 const GATEWAY_STATUSES = new Set([502, 503, 504]);
@@ -110,7 +119,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
 
     if (!response.ok) {
       const envelope = readEnvelope(payload);
-      if (envelope) throw new ApiError(envelope.code, envelope.message, response.status, envelope.requestId);
+      if (envelope) throw new ApiError(envelope.code, envelope.message, response.status, envelope.requestId, envelope.reason);
       // A gateway in front of the API answered instead of it: treat that as an outage.
       const code = GATEWAY_STATUSES.has(response.status) ? 'DISCORD_UNAVAILABLE' : 'INTERNAL';
       throw new ApiError(code, `Unexpected response (${response.status})`, response.status);

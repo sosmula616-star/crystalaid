@@ -3,7 +3,7 @@ import { MeResponse } from '@crystalaid/contracts';
 import { Button, readStored, ToastProvider } from '@crystalaid/design-system';
 import { createTranslator, isLocale, resolveLocale, type Locale, type MessageKey } from '@crystalaid/i18n';
 import { ApiError, type ApiClient } from '../api/client.js';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo-160.png';
 import { LOCALE_KEY } from '../storage-keys.js';
 import type { Session } from './session.js';
 import styles from './AuthGate.module.css';
@@ -37,16 +37,24 @@ type State = { phase: 'loading' } | { phase: 'ready'; me: MeResponse } | { phase
 interface Failure {
   title: MessageKey;
   description: MessageKey;
-  /** Show the message sent by the server instead of the description. */
-  serverMessage?: boolean;
   retry: boolean;
 }
+
+/** Machine-readable server reasons for NOT_STAFF and the text that explains each one. */
+const NOT_STAFF_REASONS: Record<string, MessageKey> = {
+  support_role_missing: 'auth.notStaff.supportRoleMissing',
+  not_in_branch: 'auth.notStaff.notInBranch',
+};
 
 function describeFailure(error: unknown): Failure {
   const code = error instanceof ApiError ? error.code : 'NETWORK';
   switch (code) {
     case 'NOT_STAFF':
-      return { title: 'auth.notStaff.title', description: 'auth.notStaff.description', serverMessage: true, retry: false };
+      return {
+        title: 'auth.notStaff.title',
+        description: (error instanceof ApiError && error.reason && NOT_STAFF_REASONS[error.reason]) || 'auth.notStaff.description',
+        retry: false,
+      };
     case 'GUILD_REQUIRED':
       return { title: 'auth.guildRequired.title', description: 'auth.guildRequired.description', retry: false };
     case 'INVALID_INSTANCE':
@@ -149,8 +157,6 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
   }
 
   const failure = describeFailure(state.error);
-  const serverMessage =
-    failure.serverMessage && state.error instanceof ApiError && state.error.message ? state.error.message : null;
   return (
     <main className={styles.screen}>
       <img className={styles.logo} src={logoUrl} alt={t('auth.logoAlt')} />
@@ -158,7 +164,7 @@ export function AuthGate({ session, api, discordLocale, children }: AuthGateProp
         <h1 ref={headingRef} tabIndex={-1} className={styles.title}>
           {t(failure.title)}
         </h1>
-        <p className={styles.description}>{serverMessage ?? t(failure.description)}</p>
+        <p className={styles.description}>{t(failure.description)}</p>
         {failure.retry ? (
           <Button variant="secondary" onClick={retryAuth}>
             {t('auth.retry')}

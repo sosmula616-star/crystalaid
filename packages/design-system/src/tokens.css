@@ -1,4 +1,6 @@
 :root {
+  color-scheme: dark;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -47,8 +49,6 @@
   --layer-dialog: 110;
   --layer-popper: 120;
   --layer-toast: 130;
-
-  font-variant-numeric: tabular-nums;
 }
 
 @media (prefers-reduced-motion: reduce) {

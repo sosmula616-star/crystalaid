@@ -41,7 +41,8 @@ async function checkSize(page: Page, level: (typeof LEVELS)[number], width: numb
   await expectInsideWindow(page, 'header');
   await expectInsideWindow(page, 'nav');
   await expect(page.getByRole('navigation', { name: NAV })).toBeVisible();
-  if (name) await expect(page.locator('header').getByText(LONG_NAME)).toBeVisible();
+  // Under 480 px the name is hidden on purpose; the level badge stays.
+  if (name && width >= 480) await expect(page.locator('header').getByText(LONG_NAME)).toBeVisible();
 
   // The navigation is usable down to the last section the level has.
   await goTo(page, width, level === 'ADMIN' ? 'Журнал' : 'Настройки');
@@ -217,4 +218,33 @@ test('a failed section chunk can be retried', async ({ page }) => {
   await waitForSection(page);
   await expect(page.getByRole('combobox').first()).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+// Final review: the section title is not squeezed by a long name.
+for (const width of [320, 360, 390]) {
+  test(`long name at ${width}: the section title keeps at least 120 px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await openApp(page, 'level=ADMIN&name=long');
+    const h1 = page.getByRole('heading', { level: 1 });
+    expect((await h1.boundingBox())!.width).toBeGreaterThanOrEqual(120);
+
+    // The longest title is readable: wrapped in full, and also in the title attribute.
+    await goTo(page, width, 'Управление магазином');
+    const box = (await h1.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(120);
+    const clipped = await h1.evaluate((el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1);
+    expect(clipped, 'the title is cut off').toBe(false);
+    await expect(h1).toHaveAttribute('title', 'Управление магазином');
+    await expectNoHorizontalScroll(page);
+  });
+}
+
+test('the name is hidden under 480 px and shown above, the level badge stays', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await openApp(page, 'level=ADMIN&name=long');
+  const header = page.locator('header');
+  await expect(header.getByText(LONG_NAME)).toBeHidden();
+  await expect(header.getByText('Админ', { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 600, height: 800 });
+  await expect(header.getByText(LONG_NAME)).toBeVisible();
 });

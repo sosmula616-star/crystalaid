@@ -14,4 +14,6 @@ body {
 
 body {
   font: var(--text-body);
+  /* The `font` shorthand resets this property, so it is set again after it. */
+  font-variant-numeric: tabular-nums;
 }

@@ -9,14 +9,19 @@ const LEVELS: readonly Level[] = ['SUPPORT', 'CURATOR', 'ADMIN'];
 /** Auth codes the scenario `?error=CODE` can produce, with the status the API uses. */
 const ERROR_STATUS: Record<string, number> = {
   NOT_STAFF: 403,
-  GUILD_REQUIRED: 403,
-  INVALID_INSTANCE: 400,
+  GUILD_REQUIRED: 400,
+  INVALID_INSTANCE: 403,
   DISCORD_UNAVAILABLE: 502,
   INTERNAL: 500,
 };
 
-const ERROR_MESSAGE: Record<string, string> = {
-  NOT_STAFF: 'У вас нет роли саппорта на этом сервере.',
+/** What the real API sends: an English message, plus a machine-readable reason where it has one. */
+const ERROR_BODY: Record<string, { message: string; reason?: string }> = {
+  NOT_STAFF: { message: 'No access to the staff panel', reason: 'not_in_branch' },
+  GUILD_REQUIRED: { message: 'Open the Activity in a server' },
+  INVALID_INSTANCE: { message: 'Invalid activity instance' },
+  DISCORD_UNAVAILABLE: { message: 'Discord is unavailable' },
+  INTERNAL: { message: 'Internal server error' },
 };
 
 const LONG_NAME = 'Konstantina Aleksandrovna Wilhelmina-Ros';
@@ -110,8 +115,12 @@ export function createMock(params: URLSearchParams): Mock {
     const method = init?.method ?? 'GET';
     if (method === 'POST' && url.pathname === '/api/auth/activity') {
       if (errorCode) {
-        const message = ERROR_MESSAGE[errorCode] ?? 'Mock error';
-        return json({ error: { code: errorCode, message } }, ERROR_STATUS[errorCode] ?? 500);
+        const { message, reason } = ERROR_BODY[errorCode] ?? { message: 'Mock error' };
+        const reasonOverride = params.get('reason') ?? reason;
+        return json(
+          { error: { code: errorCode, message, requestId: 'mock-request', ...(reasonOverride ? { reason: reasonOverride } : {}) } },
+          ERROR_STATUS[errorCode] ?? 500,
+        );
       }
       const body: ActivityAuthResponse = {
         sessionToken: 'mock-session-token',
