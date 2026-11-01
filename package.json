@@ -5,7 +5,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/check-css-colors.mjs",
     "test": "vitest run",
     "db:migrate": "pnpm --dir packages/database run migrate"
   },

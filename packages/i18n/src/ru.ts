@@ -1,0 +1,25 @@
+export const ru = {
+  'nav.overview': 'Обзор',
+  'nav.shift': 'Смена',
+  'nav.tickets': 'Тикеты',
+  'nav.stats': 'Статистика',
+  'nav.store': 'Магазин',
+  'nav.settings': 'Настройки',
+  'nav.roster': 'Состав',
+  'nav.rosterShifts': 'Смены состава',
+  'nav.allTickets': 'Все тикеты',
+  'nav.reports': 'Отчёты',
+  'nav.roles': 'Роли и доступы',
+  'nav.payroll': 'Зарплата',
+  'nav.quotas': 'Нормы',
+  'nav.storeAdmin': 'Управление магазином',
+  'nav.auditLog': 'Журнал',
+  'theme.crystal': 'Кристалл',
+  'theme.indigo': 'Индиго',
+  'theme.amber': 'Янтарь',
+  'theme.emerald': 'Изумруд',
+  'theme.graphite': 'Графит',
+  'theme.raspberry': 'Малина',
+} as const;
+
+export type MessageKey = keyof typeof ru;
