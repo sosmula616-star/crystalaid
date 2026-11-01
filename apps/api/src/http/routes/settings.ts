@@ -20,6 +20,11 @@ export function registerSettings(app: FastifyInstance, deps: { db: Db; config: S
       throw new AppError('VALIDATION_ERROR', 'Invalid request: body', 400);
     }
     return db.transaction(async (tx) => {
+      // FOR UPDATE on zero rows locks nothing, so make sure the row exists first.
+      await tx
+        .insert(settings)
+        .values({ guildId: config.guildId, data: SettingsSchema.parse({}) })
+        .onConflictDoNothing();
       const [row] = await tx.select().from(settings).where(eq(settings.guildId, config.guildId)).for('update');
       const before = SettingsSchema.parse(row?.data ?? {});
       const after = SettingsSchema.parse({ ...before, ...patch });

@@ -312,3 +312,124 @@ describe('rate limit', () => {
       expect(res.json().error.code).toBe('RATE_LIMITED');
     }));
 });
+
+describe('forged cursors', () => {
+  const forge = (ts: string, id = '00000000-0000-4000-8000-000000000000') =>
+    Buffer.from(JSON.stringify([ts, id])).toString('base64url');
+
+  it('answers 400 VALIDATION_ERROR on /staff and /audit, never 500', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      for (const ts of [
+        '2026-13-45 99:99:99+00',
+        '2026-02-30 10:00:00+00',
+        '2026-01-01 10:00:00+99',
+        '0001-01-01 10:00:00+00',
+        '9999-01-01 10:00:00+00',
+      ]) {
+        for (const url of ['/staff', '/audit']) {
+          const res = await call(ctx, 'GET', `${url}?cursor=${forge(ts)}`, admin.token);
+          expect(res.statusCode, `${url} ${ts}`).toBe(400);
+          expect(res.json().error.code).toBe('VALIDATION_ERROR');
+        }
+      }
+      const ok = await call(ctx, 'GET', `/staff?cursor=${forge('2026-01-01 10:00:00.123456+00')}`, admin.token);
+      expect(ok.statusCode).toBe(200);
+    }));
+});
+
+describe('microsecond ties', () => {
+  it('pages /staff and /audit without loss when timestamps differ only below a millisecond', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      for (let n = 2; n <= 70; n++) await member(ctx, n, [SUPPORT_ROLE]);
+      await ctx.db.$client.query(
+        `UPDATE staff_members SET joined_at = timestamptz '2026-01-01 00:00:00.123000+00' + (random() * 900) * interval '1 microsecond'`,
+      );
+      await ctx.db.$client.query(
+        `INSERT INTO audit_log (guild_id, action, created_at)
+         SELECT $1, 'micro.' || g, timestamptz '2026-01-01 00:00:00.123000+00' + (g % 7) * interval '100 microsecond'
+         FROM generate_series(1, 120) g`,
+        [GUILD],
+      );
+
+      const walk = async (url: string, key: 'userId' | 'id') => {
+        const seen: string[] = [];
+        let cursor: string | null = null;
+        do {
+          const res = await call(ctx, 'GET', `${url}${cursor ? `?cursor=${cursor}` : ''}`, admin.token);
+          expect(res.statusCode).toBe(200);
+          const body = res.json() as { items: Record<string, string>[]; nextCursor: string | null };
+          seen.push(...body.items.map((i) => i[key]!));
+          cursor = body.nextCursor;
+        } while (cursor);
+        return seen;
+      };
+
+      const staff = await walk('/staff', 'userId');
+      const expectedStaff = await ctx.db.$client.query(
+        `SELECT user_id FROM staff_members ORDER BY joined_at DESC, id DESC`,
+      );
+      expect(staff).toEqual(expectedStaff.rows.map((r: { user_id: string }) => r.user_id));
+      expect(staff).toHaveLength(70);
+
+      const audit = await walk('/audit', 'id');
+      const expectedAudit = await ctx.db.$client.query(`SELECT id FROM audit_log ORDER BY created_at DESC, id DESC`);
+      expect(audit).toEqual(expectedAudit.rows.map((r: { id: string }) => r.id));
+      expect(audit.length).toBeGreaterThanOrEqual(120);
+    }));
+});
+
+describe('more guild and concurrency checks', () => {
+  it('answers 404 on /internal/members for a member of another guild', () =>
+    withApp({ redis }, async (ctx) => {
+      const [other] = await ctx.db.insert(users).values({ discordId: discordId(80), username: 'far' }).returning();
+      await ctx.db.insert(staffMembers).values({ guildId: '999999999999999999', userId: other!.id, level: 'ADMIN' });
+      const res = await call(ctx, 'GET', `/internal/members/${discordId(80)}`, SERVICE_TOKEN);
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error.code).toBe('NOT_FOUND');
+    }));
+
+  it('keeps both fields of two concurrent PATCH /settings when no settings row exists', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      const [a, b] = await Promise.all([
+        call(ctx, 'PATCH', '/settings', admin.token, { ticketRate: 21 }),
+        call(ctx, 'PATCH', '/settings', admin.token, { normBonus: 77 }),
+      ]);
+      expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+      const final = SettingsSchema.parse((await call(ctx, 'GET', '/settings', admin.token)).json());
+      expect(final).toMatchObject({ ticketRate: 21, normBonus: 77 });
+
+      const rows = await ctx.db.select().from(auditLog).where(eq(auditLog.action, 'settings.updated'));
+      expect(rows).toHaveLength(2);
+      type D = { before: { ticketRate: number; normBonus: number }; after: { ticketRate: number; normBonus: number } };
+      const data = rows.map((r) => r.data as D);
+      const first = data.find((d) => d.before.ticketRate === 10 && d.before.normBonus === 50)!;
+      const second = data.find((d) => d !== first)!;
+      expect(first).toBeTruthy();
+      // the second change started from the state the first one left
+      expect(second.before).toEqual(first.after);
+      expect(second.after).toMatchObject({ ticketRate: 21, normBonus: 77 });
+    }));
+});
+
+describe('settings concurrency, many writers', () => {
+  it('keeps every field of six concurrent patches when no settings row exists', () =>
+    withApp({ redis }, async (ctx) => {
+      const admin = await member(ctx, 1, [ADMIN_ROLE]);
+      const patches = [
+        { ticketRate: 21 },
+        { shiftHourRate: 22 },
+        { normBonus: 23 },
+        { weeklyNormHours: 24 },
+        { weeklyNormTickets: 25 },
+        { ticketWaitMinutes: 26 },
+      ];
+      const res = await Promise.all(patches.map((p) => call(ctx, 'PATCH', '/settings', admin.token, p)));
+      expect(res.map((r) => r.statusCode)).toEqual([200, 200, 200, 200, 200, 200]);
+      const final = SettingsSchema.parse((await call(ctx, 'GET', '/settings', admin.token)).json());
+      expect(final).toMatchObject(Object.assign({}, ...patches));
+      expect(await ctx.db.select().from(auditLog).where(eq(auditLog.action, 'settings.updated'))).toHaveLength(6);
+    }));
+});

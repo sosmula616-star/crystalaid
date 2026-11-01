@@ -13,6 +13,20 @@ export interface Cursor {
 
 export const encodeCursor = (c: Cursor): string => Buffer.from(JSON.stringify([c.ts, c.id])).toString('base64url');
 
+/** Real calendar date and time, years 2000 to 2100, so Postgres never has to reject the value. */
+function isSaneTimestamp(ts: string): boolean {
+  const m = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(?:\.\d+)?([+-])(\d{2})(?::(\d{2}))?$/.exec(ts);
+  if (!m) return false;
+  const iso = `${m[1]}T${m[2]}${m[3]}${m[4]}:${m[5] ?? '00'}`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return false;
+  const year = Number(m[1]!.slice(0, 4));
+  if (year < 2000 || year > 2100) return false;
+  // JS normalises Feb 30 into March; compare the local date part to catch that.
+  const local = new Date(`${m[1]}T${m[2]}Z`);
+  return !Number.isNaN(local.getTime()) && local.toISOString().startsWith(m[1]!) && Number(m[4]) <= 15;
+}
+
 /** Opaque to clients; anything that does not decode to (timestamp, uuid) is a 400. */
 export function decodeCursor(raw: string): Cursor {
   const bad = () => new AppError('VALIDATION_ERROR', 'Invalid cursor', 400);
@@ -25,5 +39,6 @@ export function decodeCursor(raw: string): Cursor {
   if (!Array.isArray(parsed) || parsed.length !== 2) throw bad();
   const [ts, id] = parsed as unknown[];
   if (typeof ts !== 'string' || typeof id !== 'string' || !TS.test(ts) || !UUID.test(id)) throw bad();
+  if (!isSaneTimestamp(ts)) throw bad();
   return { ts, id };
 }
