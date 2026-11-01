@@ -21,7 +21,7 @@ const schema = z
     roles: z.object({
       support: roleList,
       curator: roleList,
-      admin: roleList,
+      admin: z.array(snowflake).default([]),
     }),
     users: z
       .object({

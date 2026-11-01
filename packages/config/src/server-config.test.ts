@@ -52,6 +52,13 @@ describe('parseServerConfig', () => {
     expect(() => parse(withRoles({ curator: [] }))).toThrow(/roles\.curator/);
   });
 
+  it('allows admins by user id with no admin role', () => {
+    const { admin: _admin, ...roles } = valid.roles;
+    const parsed = parse({ ...valid, roles, users: { admins: [C], developers: [] } });
+    expect(parsed.roles.admin).toEqual([]);
+    expect(parsed.users.admins).toEqual([C]);
+  });
+
   it('rejects a role id used in two lists', () => {
     expect(() => parse(withRoles({ support: [A], curator: [A] }))).toThrow(/same role/i);
   });
