@@ -4,6 +4,7 @@ export const ERROR_CODES = [
   'FORBIDDEN',
   'NOT_STAFF',
   'NOT_FOUND',
+  'CONFLICT',
   'VALIDATION_ERROR',
   'RATE_LIMITED',
   'SELF_ACTION',

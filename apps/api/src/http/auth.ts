@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Env, ServerConfig } from '@crystalaid/config';
 import { ActivityAuthRequest, AppError, type ActivityAuthResponse } from '@crystalaid/contracts';
 import { careerEvents, staffMembers, users, type Db } from '@crystalaid/database';
-import { hasPermission, type Level, type Permission } from '@crystalaid/domain';
+import { LEVEL_RANK, hasPermission, type Level, type Permission } from '@crystalaid/domain';
 import type { DiscordClient } from '../discord/client.js';
 import { getGrants } from '../services/permissions.js';
 import { SESSION_TTL_SECONDS, signSession, verifySession } from '../services/session.js';
@@ -38,8 +38,6 @@ declare module 'fastify' {
     requireService: Guard;
   }
 }
-
-const LEVEL_RANK: Record<Level, number> = { NONE: 0, SUPPORT: 1, CURATOR: 2, ADMIN: 3 };
 
 const bearer = (request: FastifyRequest): string | undefined =>
   /^Bearer (.+)$/i.exec(request.headers.authorization ?? '')?.[1];

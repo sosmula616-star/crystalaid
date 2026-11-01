@@ -4,7 +4,7 @@ import type { DiscordPort } from '../auth/session.js';
 
 type Level = Exclude<MeResponse['level'], 'NONE'>;
 
-const LEVELS: readonly Level[] = ['SUPPORT', 'CURATOR', 'ADMIN'];
+const LEVELS: readonly Level[] = ['SUPPORT', 'CURATOR', 'ADMIN', 'DEVELOPER'];
 
 /** Auth codes the scenario `?error=CODE` can produce, with the status the API uses. */
 const ERROR_STATUS: Record<string, number> = {
@@ -34,6 +34,12 @@ const PEOPLE: Record<Level, Pick<MeResponse, 'position' | 'tokenBalance' | 'perm
     tokenBalance: 1250,
     permissions: ['tickets.view_all', 'reports.view'],
   },
+  DEVELOPER: {
+    name: 'Ada Kern',
+    position: 'Разработчик',
+    tokenBalance: 0,
+    permissions: ['tickets.view_all', 'reports.view', 'payroll.approve', 'shop.manage'],
+  },
   ADMIN: {
     name: 'Ilya Brandt',
     position: 'Руководитель',
@@ -53,7 +59,7 @@ function json(body: unknown, status = 200): Response {
 
 /**
  * A fake Discord SDK and fake API answers, driven by the page address:
- * `?level=SUPPORT|CURATOR|ADMIN`, `?name=long`, `?error=NOT_STAFF` (or another auth code),
+ * `?level=SUPPORT|CURATOR|ADMIN|DEVELOPER`, `?name=long`, `?error=NOT_STAFF` (or another auth code),
  * `?pip=1` / `?pip=0` (layout mode after start) and `?locale=en-US`.
  * `window.__crystalaidLayout(mode)` emits a layout mode by hand.
  */

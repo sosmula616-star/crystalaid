@@ -41,6 +41,7 @@ export const ru = {
   'level.SUPPORT': 'Саппорт',
   'level.CURATOR': 'Куратор',
   'level.ADMIN': 'Админ',
+  'level.DEVELOPER': 'Разработчик',
   'shell.nav': 'Основная навигация',
   'shell.more': 'Ещё',
   'shell.moreTitle': 'Все разделы',

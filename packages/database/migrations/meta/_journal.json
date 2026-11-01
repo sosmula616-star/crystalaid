@@ -22,6 +22,13 @@
       "when": 1793488154648,
       "tag": "0002_staff_last_event_at",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793534087225,
+      "tag": "0003_bot_tickets_pt",
+      "breakpoints": true
     }
   ]
 }

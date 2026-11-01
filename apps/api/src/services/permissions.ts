@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { AppError } from '@crystalaid/contracts';
-import { PERMISSIONS, type Level, type Permission } from '@crystalaid/domain';
+import { PERMISSIONS, atLeast, type Level, type Permission } from '@crystalaid/domain';
 import { rolePermissions, seedDefaults, settings, type Db } from '@crystalaid/database';
 import { writeAudit } from './audit.js';
 
@@ -28,7 +28,7 @@ export async function updateGrants(
   level: GrantLevel,
   grants: Permission[],
 ): Promise<void> {
-  if (actor.level !== 'ADMIN') throw new AppError('FORBIDDEN', 'Only an admin can change permissions', 403);
+  if (!atLeast(actor.level, 'ADMIN')) throw new AppError('FORBIDDEN', 'Only an admin can change permissions', 403);
   if (level !== 'SUPPORT' && level !== 'CURATOR') {
     throw new AppError('VALIDATION_ERROR', 'Permissions can only be set for SUPPORT or CURATOR', 400);
   }

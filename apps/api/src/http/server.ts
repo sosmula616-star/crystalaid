@@ -76,7 +76,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   registerPermissions(app, routeDeps);
   registerSettings(app, routeDeps);
   registerAudit(app, routeDeps);
-  registerInternal(app, routeDeps);
+  registerInternal(app, { ...routeDeps, redis });
   return app;
 }
 

@@ -11,12 +11,8 @@ export const config: ServerConfig = {
   guildId: GUILD,
   timezone: 'Europe/Moscow',
   roles: { support: [SUPPORT_ROLE], curator: [CURATOR_ROLE], admin: [ADMIN_ROLE] },
-  channels: {
-    ticketCategory: '100000000000000021',
-    ticketPanel: '100000000000000022',
-    reports: '100000000000000023',
-    audit: '100000000000000024',
-  },
+  users: { admins: [], developers: [] },
+  channels: { log: '100000000000000021', help: '100000000000000022' },
 };
 
 export function discordId(n: number): string {

@@ -4,7 +4,7 @@ import { DiscordId } from './events.js';
 
 const IsoDate = z.iso.datetime();
 const PermissionSchema = z.enum(PERMISSIONS);
-const LevelSchema = z.enum(['NONE', 'SUPPORT', 'CURATOR', 'ADMIN']);
+const LevelSchema = z.enum(['NONE', 'SUPPORT', 'CURATOR', 'ADMIN', 'DEVELOPER']);
 const StatusSchema = z.enum(['active', 'inactive']);
 
 export const ActivityAuthRequest = z.object({

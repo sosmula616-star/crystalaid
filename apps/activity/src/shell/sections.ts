@@ -51,7 +51,7 @@ export interface Section {
   load(): Promise<{ default: ComponentType }>;
 }
 
-const RANK: Record<Level, number> = { NONE: 0, SUPPORT: 1, CURATOR: 2, ADMIN: 3 };
+const RANK: Record<Level, number> = { NONE: 0, SUPPORT: 1, CURATOR: 2, ADMIN: 3, DEVELOPER: 4 };
 
 /** Navigation groups, in display order. A section belongs to the group of its `minLevel`. */
 export const GROUPS = ['SUPPORT', 'CURATOR', 'ADMIN'] as const satisfies readonly Section['minLevel'][];
@@ -117,7 +117,7 @@ export function visibleSections(
 ): Section[] {
   return sections.filter((section) => {
     if (RANK[level] < RANK[section.minLevel]) return false;
-    if (!section.permission || level === 'ADMIN') return true;
+    if (!section.permission || RANK[level] >= RANK.ADMIN) return true;
     return permissions.includes(section.permission);
   });
 }

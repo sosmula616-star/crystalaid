@@ -34,7 +34,7 @@ export const DEFAULT_GRANTS: Record<'SUPPORT' | 'CURATOR', Permission[]> = {
 
 /** `grants` are the permissions stored in the database for the actor's level. */
 export function hasPermission(level: Level, permission: Permission, grants: Permission[]): boolean {
-  if (level === 'ADMIN') return true;
+  if (level === 'ADMIN' || level === 'DEVELOPER') return true;
   if (level === 'NONE') return false;
   return grants.includes(permission);
 }

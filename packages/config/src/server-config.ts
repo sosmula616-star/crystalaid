@@ -23,11 +23,21 @@ const schema = z
       curator: roleList,
       admin: roleList,
     }),
+    users: z
+      .object({
+        admins: z.array(snowflake).default([]),
+        developers: z.array(snowflake).default([]),
+      })
+      .default({ admins: [], developers: [] }),
     channels: z.object({
-      ticketCategory: snowflake,
-      ticketPanel: snowflake,
-      reports: snowflake,
-      audit: snowflake,
+      /** Log channel; may be on another server where the bot can write. */
+      log: snowflake,
+      /** The only channel where `/help` opens a ticket. */
+      help: snowflake,
+      ticketCategory: snowflake.optional(),
+      ticketPanel: snowflake.optional(),
+      reports: snowflake.optional(),
+      audit: snowflake.optional(),
     }),
   })
   .superRefine((cfg, ctx) => {

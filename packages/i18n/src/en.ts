@@ -44,6 +44,7 @@ export const en: Record<MessageKey, string> = {
   'level.SUPPORT': 'Support',
   'level.CURATOR': 'Curator',
   'level.ADMIN': 'Admin',
+  'level.DEVELOPER': 'Developer',
   'shell.nav': 'Main navigation',
   'shell.more': 'More',
   'shell.moreTitle': 'All sections',

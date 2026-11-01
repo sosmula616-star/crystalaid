@@ -101,7 +101,7 @@ const isStale = (staff: StaffMember, at: Date) => staff.lastEventAt !== null && 
 export async function syncMember(deps: StaffDeps, input: SyncInput): Promise<StaffMember | null> {
   const { db, config } = deps;
   const guildId = config.guildId;
-  const level = resolveLevel(input.roleIds, config.roles);
+  const level = resolveLevel(input.roleIds, config.roles, input.userId, config.users);
 
   return db.transaction(async (tx) => {
     const selectStaff = (userId: string) =>

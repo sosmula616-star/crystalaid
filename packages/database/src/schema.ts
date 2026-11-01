@@ -21,7 +21,7 @@ import type { Level } from '@crystalaid/domain';
 // `guild_id` is the Discord guild id as text. There is no guilds table.
 // Balances and amounts are bigint in number mode; times are timestamptz.
 
-export const LEVELS = ['NONE', 'SUPPORT', 'CURATOR', 'ADMIN'] as const satisfies readonly Level[];
+export const LEVELS = ['NONE', 'SUPPORT', 'CURATOR', 'ADMIN', 'DEVELOPER'] as const satisfies readonly Level[];
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const guildId = () => text('guild_id').notNull();
@@ -122,6 +122,8 @@ export const tickets = pgTable(
     claimedBy: optUserRef('claimed_by'),
     createdAt: createdAt(),
     claimedAt: ts('claimed_at'),
+    // Last time the ticket was offered to supports; null while nobody was on duty.
+    offeredAt: ts('offered_at'),
     firstResponseAt: ts('first_response_at'),
     closedAt: ts('closed_at'),
     closedBy: optUserRef('closed_by'),
@@ -136,6 +138,38 @@ export const tickets = pgTable(
     index('tickets_guild_status_idx').on(t.guildId, t.status),
     check('tickets_status_chk', inList('status', TICKET_STATUSES)),
     check('tickets_rating_chk', sql`${t.rating} IS NULL OR ${t.rating} BETWEEN 1 AND 5`),
+  ],
+);
+
+// One anti-bot task per support per ticket. `answer` never leaves the API.
+export const ticketChallenges = pgTable(
+  'ticket_challenges',
+  {
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => tickets.id, { onDelete: 'cascade' }),
+    userId: userRef(),
+    answer: text('answer').notNull(),
+    attemptedAt: ts('attempted_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.ticketId, t.userId] })],
+);
+
+// Hourly duty slots (PT). `starts_at` is aligned to the hour in the configured timezone.
+export const ptSlots = pgTable(
+  'pt_slots',
+  {
+    id: id(),
+    guildId: guildId(),
+    startsAt: ts('starts_at').notNull(),
+    userId: userRef(),
+    remindedAt: ts('reminded_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique('pt_slots_guild_start_user_uq').on(t.guildId, t.startsAt, t.userId),
+    index('pt_slots_guild_start_idx').on(t.guildId, t.startsAt),
   ],
 );
 
@@ -444,6 +478,8 @@ export const TABLE_NAMES = [
   'tickets',
   'ticket_events',
   'ticket_messages',
+  'ticket_challenges',
+  'pt_slots',
   'staff_daily',
   'presence_sessions',
   'voice_sessions',
